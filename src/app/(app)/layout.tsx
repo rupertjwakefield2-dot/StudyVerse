@@ -9,7 +9,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const session = await getCurrentUser();
   if (!session) redirect("/login");
 
-  const u = store.getUserById(session.id)!;
+  const u = (await store.getUserById(session.id))!;
   const used = u.dailyUsageDay === todayKey() ? u.dailyUsage : 0;
   const initial: Me = {
     id: u.id,

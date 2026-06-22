@@ -51,7 +51,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   try {
     const { payload } = await jwtVerify(token, secret);
     const uid = payload.uid as string;
-    const user = store.getUserById(uid);
+    const user = await store.getUserById(uid);
     if (!user) return null;
     return { id: user.id, email: user.email, name: user.name, isPremium: user.isPremium };
   } catch {

@@ -5,7 +5,7 @@ import { handler, ok } from "@/lib/api";
 export async function GET() {
   return handler(async () => {
     const user = await requireUser();
-    const sessions = store.sessionsWithCounts(user.id, 30);
+    const sessions = await store.sessionsWithCounts(user.id, 30);
     return ok({
       sessions: sessions.map((s) => ({
         id: s.id,

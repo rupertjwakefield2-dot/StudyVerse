@@ -41,7 +41,7 @@ export async function POST(req: Request) {
 
     let quizId: string | undefined;
     if (input.save) {
-      quizId = store.createQuiz({
+      quizId = await store.createQuiz({
         title: quiz.title,
         subject: quiz.subject,
         topic: quiz.topic,

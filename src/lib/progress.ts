@@ -21,7 +21,7 @@ export class DailyLimitError extends Error {
 
 /** Check + increment daily usage. Premium users are unlimited. */
 export async function consumeUsage(userId: string): Promise<{ remaining: number }> {
-  const user = store.getUserById(userId);
+  const user = await store.getUserById(userId);
   if (!user) throw new Error("User not found");
   if (user.isPremium) return { remaining: Infinity };
 
@@ -29,7 +29,7 @@ export async function consumeUsage(userId: string): Promise<{ remaining: number 
   const used = user.dailyUsageDay === today ? user.dailyUsage : 0;
   if (used >= FREE_DAILY_LIMIT) throw new DailyLimitError();
 
-  store.updateUser(userId, { dailyUsage: used + 1, dailyUsageDay: today });
+  await store.updateUser(userId, { dailyUsage: used + 1, dailyUsageDay: today });
   return { remaining: FREE_DAILY_LIMIT - (used + 1) };
 }
 
@@ -38,7 +38,7 @@ export async function awardProgress(
   userId: string,
   opts: { xp?: number; coins?: number }
 ) {
-  const user = store.getUserById(userId);
+  const user = await store.getUserById(userId);
   if (!user) throw new Error("User not found");
   const today = todayKey();
   const { streak, isNewDay } = nextStreak(user.lastActiveDay, user.streak, today);
@@ -46,7 +46,7 @@ export async function awardProgress(
   const level = levelFromXp(xp);
   const leveledUp = level > user.level;
 
-  const updated = store.updateUser(userId, {
+  const updated = await store.updateUser(userId, {
     xp,
     level,
     coins: user.coins + (opts.coins ?? 0),
@@ -72,13 +72,13 @@ export async function recordTopicResult(
   topic: string,
   wasCorrect: boolean
 ) {
-  const existing = store.getTopic(userId, subject, topic);
+  const existing = await store.getTopic(userId, subject, topic);
   const prev = existing?.mastery ?? 0.3;
   const { mastery, isWeak, nextReviewDays } = updateMastery(prev, wasCorrect);
   const nextReview = new Date();
   nextReview.setDate(nextReview.getDate() + nextReviewDays);
 
-  store.upsertTopic(userId, subject, topic, {
+  await store.upsertTopic(userId, subject, topic, {
     mastery,
     isWeak,
     nextReview: nextReview.toISOString(),

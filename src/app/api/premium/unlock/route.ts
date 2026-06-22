@@ -16,7 +16,7 @@ export async function POST() {
       return bad("Use the Stripe checkout flow to purchase premium.", 400);
     }
 
-    store.updateUser(user.id, { isPremium: true, premiumSince: new Date().toISOString() });
+    await store.updateUser(user.id, { isPremium: true, premiumSince: new Date().toISOString() });
     return ok({ isPremium: true, devUnlock: true });
   });
 }

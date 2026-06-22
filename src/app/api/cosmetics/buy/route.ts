@@ -14,13 +14,13 @@ export async function POST(req: Request) {
     const item = COSMETIC_MAP.get(parsed.data.id);
     if (!item) return bad("Unknown item.", 404);
 
-    const u = store.getUserById(user.id)!;
+    const u = (await store.getUserById(user.id))!;
     if (item.premium && !u.isPremium) return bad("This item is exclusive to Premium members.", 403);
-    if (item.price === 0 || store.hasCosmetic(user.id, item.id)) return bad("You already own this.", 409);
+    if (item.price === 0 || (await store.hasCosmetic(user.id, item.id))) return bad("You already own this.", 409);
     if (u.coins < item.price) return bad("Not enough coins. Play more games to earn them!", 402);
 
-    store.updateUser(user.id, { coins: u.coins - item.price });
-    store.grantCosmetic(user.id, item.id);
+    await store.updateUser(user.id, { coins: u.coins - item.price });
+    await store.grantCosmetic(user.id, item.id);
 
     return ok({ owned: true, coins: u.coins - item.price });
   });

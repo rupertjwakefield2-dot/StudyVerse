@@ -9,7 +9,7 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const setId = url.searchParams.get("setId") || null;
 
-    const cards = store.dueFlashcards(user.id, setId, 30);
+    const cards = await store.dueFlashcards(user.id, setId, 30);
     return ok({
       cards: cards.map((c) => ({ id: c.id, front: c.front, back: c.back, topic: c.topic, subject: c.subject })),
     });

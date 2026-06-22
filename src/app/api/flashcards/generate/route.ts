@@ -37,12 +37,12 @@ export async function POST(req: Request) {
 
     let setId: string | undefined;
     if (input.save) {
-      setId = store.createSet({
+      setId = await store.createSet({
         userId: user.id,
         title: input.title || result.title,
         subject: result.subject,
       });
-      store.createFlashcards(
+      await store.createFlashcards(
         user.id,
         setId,
         result.cards.map((c) => ({ front: c.front, back: c.back, subject: result.subject, topic: c.topic }))

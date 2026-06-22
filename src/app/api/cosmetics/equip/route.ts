@@ -15,11 +15,11 @@ export async function POST(req: Request) {
     if (!item) return bad("Unknown item.", 404);
 
     // Free items are owned by everyone; otherwise must have purchased.
-    if (item.price > 0 && !store.hasCosmetic(user.id, item.id)) {
+    if (item.price > 0 && !(await store.hasCosmetic(user.id, item.id))) {
       return bad("You don't own this item yet.", 403);
     }
 
-    store.updateUser(user.id, { avatar: item.id });
+    await store.updateUser(user.id, { avatar: item.id });
     return ok({ equipped: item.id });
   });
 }

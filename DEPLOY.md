@@ -1,73 +1,71 @@
-# Deploying Synapse to a permanent public URL
+# Deploying Synapse — free, 24/7, with persistent data
 
 Synapse runs a **custom Node server (Next.js + Socket.io)**, so it needs a host that keeps a
-process alive and allows WebSockets. Below is the **Google Cloud Run** path (the Firebase/Google
-way, no GitHub required) plus a no-card fallback.
+process alive and allows WebSockets (plain Firebase Hosting / Vercel can't hold WebSockets open).
+
+This is the **100% free, no-credit-card** stack that also **persists accounts and progress**:
+
+| Piece | Service | Free? | Why |
+|---|---|---|---|
+| Code | **GitLab** | ✅ no card | Render pulls code from here (you preferred not to use GitHub) |
+| Host | **Render** (web service) | ✅ no card | Permanent `*.onrender.com` URL, supports WebSockets |
+| Database | **Turso** (libSQL) | ✅ no card | SQLite-compatible cloud DB so data survives restarts |
+
+The app auto-detects Turso: set `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN` and it uses the cloud DB;
+leave them unset locally and it uses a local SQLite file.
 
 ---
 
-## Option A — Google Cloud Run (Firebase / Google, no GitHub)
-
-Cloud Run runs the `Dockerfile` in this repo. It deploys **straight from this folder** — Google
-builds it in the cloud, so you don't need Docker or GitHub locally.
-
-> Requires enabling **billing (Blaze plan)** with a credit card. Cloud Run's free monthly allowance
-> (2M requests) means low-traffic apps typically cost **$0**, but the card is mandatory.
-
-### One-time setup
-1. **Install the Google Cloud SDK** (`gcloud`): https://cloud.google.com/sdk/docs/install
-2. Sign in and pick/create a project:
+## Step 1 — Create the free Turso database (persistent data)
+1. Sign up at https://turso.tech (GitHub/email, **no card**).
+2. Install the CLI (or use their web dashboard):
+   - Windows: `winget install Turso.Turso`  ·  or see https://docs.turso.tech/cli/installation
+3. Create the DB and grab credentials:
    ```bash
-   gcloud auth login
-   gcloud projects create synapse-<your-initials> --name="Synapse"
-   gcloud config set project synapse-<your-initials>
+   turso auth login
+   turso db create synapse
+   turso db show synapse --url           # -> libsql://synapse-xxxx.turso.io   (TURSO_DATABASE_URL)
+   turso db tokens create synapse        # -> a long token                     (TURSO_AUTH_TOKEN)
    ```
-3. In the Cloud Console, open **Billing** and link a card to this project (enables Blaze).
-4. Enable the needed APIs:
-   ```bash
-   gcloud services enable run.googleapis.com cloudbuild.googleapis.com
-   ```
+   Keep these two values for Step 3. (Tables are created automatically on first run.)
 
-### Deploy (run this any time you want to publish changes)
+## Step 2 — Put the code on GitLab
+1. Create a free account at https://gitlab.com and a **new blank project** (e.g. `synapse`), no README.
+2. In the `synapse` folder, push (this repo is already committed):
+   ```bash
+   git remote add origin https://gitlab.com/<your-username>/synapse.git
+   git branch -M main
+   git push -u origin main
+   ```
+   (GitLab will prompt for your username + a personal access token as the password.)
+
+## Step 3 — Deploy on Render
+1. Sign up at https://render.com (you can sign in with GitLab, **no card**).
+2. **New ▸ Blueprint**, connect your GitLab account, pick the `synapse` repo. Render reads
+   `render.yaml` automatically.
+3. Before the first deploy, add two environment variables (Render dashboard ▸ Environment):
+   - `TURSO_DATABASE_URL` = the `libsql://…` URL from Step 1
+   - `TURSO_AUTH_TOKEN` = the token from Step 1
+   (`JWT_SECRET` is generated for you; `AI_PROVIDER=mock` keeps it free.)
+4. Click **Apply / Deploy**. In a few minutes you get a permanent public URL like
+   `https://synapse-xxxx.onrender.com` — open it from anywhere, share it with anyone, 24/7.
+
+> Render's free tier sleeps after ~15 min of no traffic and takes ~30s to wake on the next visit.
+> The URL is always reachable; it just cold-starts. To remove the delay, upgrade that one service to
+> Render's paid Starter plan later — no code changes needed.
+
+### Enabling real AI (optional, has cost)
+Add `ANTHROPIC_API_KEY` in Render's Environment and set `AI_PROVIDER=anthropic`. Leave it on `mock`
+to stay free.
+
+---
+
+## Alternative — Google Cloud Run (the "Firebase" way; needs a card)
+Cloud Run runs the included `Dockerfile`, supports WebSockets, and deploys **without GitHub**:
 ```bash
-cd synapse
-gcloud run deploy synapse \
-  --source . \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --port 8080 \
-  --max-instances 1 \
-  --set-env-vars NODE_ENV=production,AI_PROVIDER=mock,JWT_SECRET=PUT_A_LONG_RANDOM_STRING_HERE
+gcloud run deploy synapse --source . --region us-central1 --allow-unauthenticated \
+  --port 8080 --max-instances 1 \
+  --set-env-vars NODE_ENV=production,AI_PROVIDER=mock,JWT_SECRET=<random>,TURSO_DATABASE_URL=<url>,TURSO_AUTH_TOKEN=<token>
 ```
-- `--max-instances 1` keeps the live-game sockets + database on a single instance (required for
-  multiplayer to behave correctly).
-- When it finishes, gcloud prints your public URL, e.g. `https://synapse-xxxxx-uc.a.run.app` —
-  open it from anywhere, 24/7.
-- Want zero cold-start delay? add `--min-instances 1` (keeps one instance warm; may incur a small
-  charge beyond the free tier).
-
-**Database note:** Cloud Run instances are disposable, so the built-in SQLite resets when the
-instance restarts. For persistent accounts/progress, migrate the data layer (`src/lib/store.ts`) to
-**Firestore** or **Cloud SQL**. (Ask and I'll do this.)
-
----
-
-## Option B — Firebase App Hosting (newer, full Next.js)
-Firebase **App Hosting** natively builds Next.js on Cloud Run, but it **connects to a GitHub/GitLab
-repo** and also requires the Blaze plan. If you're open to a git host, this is the most "Firebase
-native" route: Firebase console ▸ App Hosting ▸ connect repo. Same Cloud Run database caveat applies.
-
----
-
-## Option C — Render (free, no credit card) — needs a git host
-The simplest **free, no-card** path. Render reads `render.yaml` in this repo. It needs your code on a
-git host (GitHub **or GitLab**). Then: Render ▸ New ▸ Blueprint ▸ connect the repo. You get a
-permanent `*.onrender.com` URL. Free tier sleeps after ~15 min idle (~30s wake), but is always
-reachable.
-
----
-
-## Why not plain Firebase Hosting / Vercel?
-Both are optimized for static + serverless functions, which **cannot hold open WebSocket
-connections** — that would break the live multiplayer games. Use Cloud Run / Render / Railway / Fly /
-a VPS, all of which run a persistent Node process.
+Requires enabling **billing (Blaze)** with a credit card (Cloud Run's free tier usually keeps the bill
+at $0). Use the same Turso vars for persistence.

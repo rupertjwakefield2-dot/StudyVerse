@@ -6,8 +6,8 @@ import { COSMETICS } from "@/lib/cosmetics";
 export async function GET() {
   return handler(async () => {
     const user = await requireUser();
-    const u = store.getUserById(user.id)!;
-    const ownedSet = new Set(store.ownedCosmetics(user.id));
+    const u = (await store.getUserById(user.id))!;
+    const ownedSet = new Set(await store.ownedCosmetics(user.id));
 
     return ok({
       coins: u.coins,

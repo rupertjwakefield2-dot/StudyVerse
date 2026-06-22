@@ -15,10 +15,10 @@ export async function POST(req: Request) {
     if (!parsed.success) return bad("Please provide a name, valid email, and a 6+ character password.");
     const { name, email, password } = parsed.data;
 
-    const existing = store.getUserByEmail(email);
+    const existing = await store.getUserByEmail(email);
     if (existing) return bad("An account with that email already exists.", 409);
 
-    const user = store.createUser({
+    const user = await store.createUser({
       name,
       email,
       passwordHash: await hashPassword(password),

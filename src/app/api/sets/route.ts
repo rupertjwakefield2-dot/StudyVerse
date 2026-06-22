@@ -6,7 +6,7 @@ import { handler, ok } from "@/lib/api";
 export async function GET() {
   return handler(async () => {
     const user = await requireUser();
-    const sets = store.setsWithCounts(user.id);
+    const sets = await store.setsWithCounts(user.id);
     return ok({
       sets: sets.map((s) => ({
         id: s.id,

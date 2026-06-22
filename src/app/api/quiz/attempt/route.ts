@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     const total = input.results.length;
     const score = input.results.filter((r) => r.correct).length;
 
-    const fullUser = store.getUserById(user.id)!;
+    const fullUser = (await store.getUserById(user.id))!;
     const { xp, coins } = quizReward(score, total, input.difficulty, fullUser.isPremium);
 
     // Update per-topic mastery for the adaptive engine.
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
     // Persist the attempt (against a real quiz if we have one, else a shell).
     let quizId = input.quizId;
     if (!quizId) {
-      quizId = store.createQuiz({
+      quizId = await store.createQuiz({
         title: input.title,
         subject: input.subject,
         topic: input.topic,
@@ -46,7 +46,7 @@ export async function POST(req: Request) {
         questions: "[]",
       });
     }
-    store.createAttempt({ userId: user.id, quizId, score, total, xpEarned: xp, coinsEarned: coins });
+    await store.createAttempt({ userId: user.id, quizId, score, total, xpEarned: xp, coinsEarned: coins });
 
     const progress = await awardProgress(user.id, { xp, coins });
     return ok({ score, total, xp, coins, progress });

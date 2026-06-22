@@ -14,7 +14,7 @@ export async function POST(req: Request) {
     if (!parsed.success) return bad("Enter your email and password.");
     const { email, password } = parsed.data;
 
-    const user = store.getUserByEmail(email);
+    const user = await store.getUserByEmail(email);
     if (!user || !(await verifyPassword(password, user.passwordHash))) {
       return bad("Incorrect email or password.", 401);
     }

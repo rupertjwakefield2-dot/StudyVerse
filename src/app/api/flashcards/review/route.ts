@@ -18,11 +18,11 @@ export async function POST(req: Request) {
     if (!parsed.success) return bad("Invalid review.");
     const { cardId, grade } = parsed.data;
 
-    const card = store.getFlashcard(user.id, cardId);
+    const card = await store.getFlashcard(user.id, cardId);
     if (!card) return bad("Card not found.", 404);
 
     const next = sm2({ ease: card.ease, interval: card.interval, repetition: card.repetition }, grade);
-    store.updateFlashcardSrs(card.id, {
+    await store.updateFlashcardSrs(card.id, {
       ease: next.ease,
       interval: next.interval,
       repetition: next.repetition,

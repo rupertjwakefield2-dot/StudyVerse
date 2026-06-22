@@ -45,7 +45,7 @@ export async function POST(req: Request) {
     // Persist the session + interaction history.
     let sessionId = input.sessionId;
     if (!sessionId) {
-      sessionId = store.createSession({
+      sessionId = await store.createSession({
         userId: user.id,
         title: input.question.slice(0, 70),
         subject: response.subject,
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
       });
     }
 
-    store.createInteraction({
+    await store.createInteraction({
       userId: user.id,
       sessionId,
       mode: input.mode,
@@ -67,7 +67,7 @@ export async function POST(req: Request) {
 
     // Touch the topic (engagement, not a correctness signal here) + award XP.
     await recordTopicResult(user.id, response.subject, response.topic, true);
-    const fullUser = store.getUserById(user.id)!;
+    const fullUser = (await store.getUserById(user.id))!;
     const earned = tutorXp(input.difficulty, fullUser.isPremium);
     const progress = await awardProgress(user.id, { xp: earned, coins: 2 });
 

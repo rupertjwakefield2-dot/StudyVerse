@@ -1,38 +1,98 @@
 import "server-only";
-import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import bcrypt from "bcryptjs";
+import { createClient } from "@libsql/client/web";
 import { COSMETICS, DEFAULT_OWNED } from "./cosmetics";
 
 /**
- * Data layer backed by Node's built-in SQLite (node:sqlite). Chosen over an
- * ORM with a native engine so it runs everywhere Node runs — including Windows
- * ARM64 — with zero extra native dependencies. Synchronous API; fine inside
- * route handlers.
+ * Data layer behind one async interface with two interchangeable backends:
+ *
+ *  - LOCAL DEV  → Node's built-in `node:sqlite` (a file on disk; offline,
+ *    arm64-native, zero install).
+ *  - PRODUCTION → Turso / libSQL over HTTP (`@libsql/client/web`, pure JS) when
+ *    TURSO_DATABASE_URL is set — so accounts and progress PERSIST across the
+ *    host's restarts. SQLite dialect, so the same SQL runs on both.
+ *
+ * Everything is async so the two backends share one code path.
  */
 
-function resolveDbPath(): string {
+interface Backend {
+  all(sql: string, params?: unknown[]): Promise<any[]>;
+  get(sql: string, params?: unknown[]): Promise<any | undefined>;
+  run(sql: string, params?: unknown[]): Promise<void>;
+  execScript(sql: string): Promise<void>;
+}
+
+// --- Local backend: node:sqlite (synchronous engine wrapped as async) ---
+class NodeBackend implements Backend {
+  private constructor(private db: any) {}
+  static async create(file: string): Promise<NodeBackend> {
+    // Dynamic import so the production (libSQL) path never loads node:sqlite.
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(file);
+    db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+    return new NodeBackend(db);
+  }
+  async all(sql: string, params: unknown[] = []) { return this.db.prepare(sql).all(...params); }
+  async get(sql: string, params: unknown[] = []) { return this.db.prepare(sql).get(...params); }
+  async run(sql: string, params: unknown[] = []) { this.db.prepare(sql).run(...params); }
+  async execScript(sql: string) { this.db.exec(sql); }
+}
+
+// --- Production backend: libSQL / Turso over HTTP (pure JS) ---
+class LibsqlBackend implements Backend {
+  private client: ReturnType<typeof createClient>;
+  constructor(url: string, authToken?: string) {
+    this.client = createClient({ url, authToken });
+  }
+  private toObjects(rs: any): any[] {
+    return rs.rows.map((row: any) => {
+      const o: Record<string, unknown> = {};
+      for (const c of rs.columns) o[c] = row[c];
+      return o;
+    });
+  }
+  async all(sql: string, params: unknown[] = []) {
+    return this.toObjects(await this.client.execute({ sql, args: params as any }));
+  }
+  async get(sql: string, params: unknown[] = []) {
+    return this.toObjects(await this.client.execute({ sql, args: params as any }))[0];
+  }
+  async run(sql: string, params: unknown[] = []) {
+    await this.client.execute({ sql, args: params as any });
+  }
+  async execScript(sql: string) {
+    await this.client.executeMultiple(sql);
+  }
+}
+
+function resolveLocalPath(): string {
   const url = process.env.DATABASE_URL || "file:./synapse.db";
   const file = url.startsWith("file:") ? url.slice(5) : url;
   return path.resolve(process.cwd(), file);
 }
 
-const g = globalThis as unknown as { __synapseDb?: DatabaseSync };
+const g = globalThis as unknown as { __synapseBackend?: Promise<Backend> };
 
-function open(): DatabaseSync {
-  if (g.__synapseDb) return g.__synapseDb;
-  const db = new DatabaseSync(resolveDbPath());
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
-  migrate(db);
-  seed(db);
-  seedDemo(db);
-  g.__synapseDb = db;
-  return db;
+function getBackend(): Promise<Backend> {
+  if (!g.__synapseBackend) g.__synapseBackend = init();
+  return g.__synapseBackend;
 }
 
-function migrate(db: DatabaseSync) {
-  db.exec(`
+async function init(): Promise<Backend> {
+  const tursoUrl = process.env.TURSO_DATABASE_URL;
+  const backend: Backend = tursoUrl
+    ? new LibsqlBackend(tursoUrl, process.env.TURSO_AUTH_TOKEN)
+    : await NodeBackend.create(resolveLocalPath());
+  await migrate(backend);
+  await seed(backend);
+  await seedDemo(backend);
+  return backend;
+}
+
+async function migrate(db: Backend) {
+  await db.execScript(`
   CREATE TABLE IF NOT EXISTS User (
     id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
     passwordHash TEXT NOT NULL, avatar TEXT NOT NULL DEFAULT 'fox',
@@ -99,58 +159,61 @@ function migrate(db: DatabaseSync) {
   `);
 }
 
-function seed(db: DatabaseSync) {
-  const count = (db.prepare("SELECT COUNT(*) c FROM Cosmetic").get() as { c: number }).c;
-  if (count === 0) {
-    const ins = db.prepare(
-      "INSERT INTO Cosmetic (id,name,type,price,rarity,premium) VALUES (?,?,?,?,?,?)"
-    );
-    for (const c of COSMETICS) ins.run(c.id, c.name, "avatar", c.price, c.rarity, c.premium ? 1 : 0);
+async function seed(db: Backend) {
+  const row = await db.get("SELECT COUNT(*) AS c FROM Cosmetic");
+  if (Number(row?.c ?? 0) === 0) {
+    for (const c of COSMETICS) {
+      await db.run("INSERT INTO Cosmetic (id,name,type,price,rarity,premium) VALUES (?,?,?,?,?,?)", [
+        c.id, c.name, "avatar", c.price, c.rarity, c.premium ? 1 : 0,
+      ]);
+    }
   }
 }
 
-const now = () => new Date().toISOString();
-const id = () => randomUUID();
-const bool = (v: unknown) => v === 1 || v === true;
-
 // Seed a ready-to-explore demo account so the app isn't empty on first run.
-function seedDemo(db: DatabaseSync) {
-  const existing = db.prepare("SELECT id FROM User WHERE email = ?").get("demo@synapse.app") as { id: string } | undefined;
+async function seedDemo(db: Backend) {
+  const existing = await db.get("SELECT id FROM User WHERE email = ?", ["demo@synapse.app"]);
   if (existing) return;
   const uid = randomUUID();
   const today = new Date().toISOString().slice(0, 10);
-  db.prepare(
+  await db.run(
     `INSERT INTO User (id,email,name,passwordHash,avatar,createdAt,xp,level,coins,streak,longestStreak,lastActiveDay)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
-  ).run(uid, "demo@synapse.app", "Demo Student", bcrypt.hashSync("demo1234", 10), "panda", now(), 640, 4, 320, 5, 9, today);
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [uid, "demo@synapse.app", "Demo Student", bcrypt.hashSync("demo1234", 10), "panda", now(), 640, 4, 320, 5, 9, today]
+  );
 
-  const topics = [
+  const topics: [string, string, number, number][] = [
     ["Mathematics", "Algebra", 0.82, 0], ["Mathematics", "Calculus", 0.41, 1],
     ["Physics", "Mechanics", 0.38, 1], ["Biology", "Cells", 0.67, 0],
     ["Chemistry", "Reactions", 0.52, 1],
-  ] as const;
-  const tIns = db.prepare(
-    `INSERT INTO TopicMastery (id,userId,subject,topic,mastery,attempts,correct,isWeak,lastSeen,nextReview) VALUES (?,?,?,?,?,?,?,?,?,?)`
-  );
+  ];
   for (const [subject, topic, mastery, weak] of topics) {
-    tIns.run(randomUUID(), uid, subject, topic, mastery, 6, Math.round(6 * mastery), weak, now(), now());
+    await db.run(
+      `INSERT INTO TopicMastery (id,userId,subject,topic,mastery,attempts,correct,isWeak,lastSeen,nextReview) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [randomUUID(), uid, subject, topic, mastery, 6, Math.round(6 * mastery), weak, now(), now()]
+    );
   }
 
   const setId = randomUUID();
-  db.prepare(`INSERT INTO StudySet (id,userId,title,subject,createdAt) VALUES (?,?,?,?,?)`)
-    .run(setId, uid, "Biology — Cell Structure", "Biology", now());
-  const fIns = db.prepare(
-    `INSERT INTO Flashcard (id,userId,setId,front,back,subject,topic,ease,interval,repetition,dueAt,createdAt) VALUES (?,?,?,?,?,?,?,2.5,0,0,?,?)`
-  );
+  await db.run(`INSERT INTO StudySet (id,userId,title,subject,createdAt) VALUES (?,?,?,?,?)`,
+    [setId, uid, "Biology — Cell Structure", "Biology", now()]);
   const cards = [
     ["What is the function of mitochondria?", "The powerhouse of the cell — it produces ATP through respiration."],
     ["What does the nucleus contain?", "The cell's DNA — it controls cell activities and reproduction."],
     ["What is the role of the cell membrane?", "It controls what enters and leaves the cell (selective permeability)."],
   ];
-  for (const [front, back] of cards) fIns.run(randomUUID(), uid, setId, front, back, "Biology", "Cells", now(), now());
+  for (const [front, back] of cards) {
+    await db.run(
+      `INSERT INTO Flashcard (id,userId,setId,front,back,subject,topic,ease,interval,repetition,dueAt,createdAt) VALUES (?,?,?,?,?,?,?,2.5,0,0,?,?)`,
+      [randomUUID(), uid, setId, front, back, "Biology", "Cells", now(), now()]
+    );
+  }
 }
 
-// --- Row types (booleans normalized to JS booleans by the accessors below) ---
+const now = () => new Date().toISOString();
+const id = () => randomUUID();
+const bool = (v: unknown) => v === 1 || v === true || v === "1";
+
 export interface UserRow {
   id: string; email: string; name: string; passwordHash: string; avatar: string;
   createdAt: string; isPremium: boolean; premiumSince: string | null;
@@ -164,161 +227,190 @@ function mapUser(r: any): UserRow {
 
 export const store = {
   // ---------------- Users ----------------
-  getUserById(uid: string): UserRow | null {
-    const r = open().prepare("SELECT * FROM User WHERE id = ?").get(uid);
+  async getUserById(uid: string): Promise<UserRow | null> {
+    const db = await getBackend();
+    const r = await db.get("SELECT * FROM User WHERE id = ?", [uid]);
     return r ? mapUser(r) : null;
   },
-  getUserByEmail(email: string): UserRow | null {
-    const r = open().prepare("SELECT * FROM User WHERE email = ?").get(email.toLowerCase());
+  async getUserByEmail(email: string): Promise<UserRow | null> {
+    const db = await getBackend();
+    const r = await db.get("SELECT * FROM User WHERE email = ?", [email.toLowerCase()]);
     return r ? mapUser(r) : null;
   },
-  createUser(input: { name: string; email: string; passwordHash: string; avatar?: string }): UserRow {
-    const db = open();
+  async createUser(input: { name: string; email: string; passwordHash: string; avatar?: string }): Promise<UserRow> {
+    const db = await getBackend();
     const uid = id();
-    db.prepare(
-      `INSERT INTO User (id,email,name,passwordHash,avatar,createdAt) VALUES (?,?,?,?,?,?)`
-    ).run(uid, input.email.toLowerCase(), input.name, input.passwordHash, input.avatar ?? "fox", now());
-    return this.getUserById(uid)!;
+    await db.run(
+      `INSERT INTO User (id,email,name,passwordHash,avatar,createdAt) VALUES (?,?,?,?,?,?)`,
+      [uid, input.email.toLowerCase(), input.name, input.passwordHash, input.avatar ?? "fox", now()]
+    );
+    return (await this.getUserById(uid))!;
   },
-  updateUser(uid: string, data: Record<string, string | number | boolean | null>): UserRow {
+  async updateUser(uid: string, data: Record<string, string | number | boolean | null>): Promise<UserRow> {
     const keys = Object.keys(data);
     if (keys.length) {
+      const db = await getBackend();
       const set = keys.map((k) => `${k} = ?`).join(", ");
       const vals = keys.map((k) => {
         const v = data[k];
         return typeof v === "boolean" ? (v ? 1 : 0) : v;
       });
-      open().prepare(`UPDATE User SET ${set} WHERE id = ?`).run(...(vals as any), uid);
+      await db.run(`UPDATE User SET ${set} WHERE id = ?`, [...vals, uid]);
     }
-    return this.getUserById(uid)!;
+    return (await this.getUserById(uid))!;
   },
 
   // ---------------- Topic mastery ----------------
-  getTopic(uid: string, subject: string, topic: string) {
-    return open().prepare(
-      "SELECT * FROM TopicMastery WHERE userId = ? AND subject = ? AND topic = ?"
-    ).get(uid, subject, topic) as any | undefined;
+  async getTopic(uid: string, subject: string, topic: string) {
+    const db = await getBackend();
+    return db.get("SELECT * FROM TopicMastery WHERE userId = ? AND subject = ? AND topic = ?", [uid, subject, topic]);
   },
-  upsertTopic(uid: string, subject: string, topic: string, data: { mastery: number; isWeak: boolean; nextReview: string; correctDelta: number }) {
-    const db = open();
-    const existing = this.getTopic(uid, subject, topic);
+  async upsertTopic(uid: string, subject: string, topic: string, data: { mastery: number; isWeak: boolean; nextReview: string; correctDelta: number }) {
+    const db = await getBackend();
+    const existing = await this.getTopic(uid, subject, topic);
     if (existing) {
-      db.prepare(
-        `UPDATE TopicMastery SET mastery=?, attempts=attempts+1, correct=correct+?, isWeak=?, lastSeen=?, nextReview=? WHERE id=?`
-      ).run(data.mastery, data.correctDelta, data.isWeak ? 1 : 0, now(), data.nextReview, existing.id);
+      await db.run(
+        `UPDATE TopicMastery SET mastery=?, attempts=attempts+1, correct=correct+?, isWeak=?, lastSeen=?, nextReview=? WHERE id=?`,
+        [data.mastery, data.correctDelta, data.isWeak ? 1 : 0, now(), data.nextReview, existing.id]
+      );
     } else {
-      db.prepare(
-        `INSERT INTO TopicMastery (id,userId,subject,topic,mastery,attempts,correct,isWeak,lastSeen,nextReview) VALUES (?,?,?,?,?,?,?,?,?,?)`
-      ).run(id(), uid, subject, topic, data.mastery, 1, data.correctDelta, data.isWeak ? 1 : 0, now(), data.nextReview);
+      await db.run(
+        `INSERT INTO TopicMastery (id,userId,subject,topic,mastery,attempts,correct,isWeak,lastSeen,nextReview) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [id(), uid, subject, topic, data.mastery, 1, data.correctDelta, data.isWeak ? 1 : 0, now(), data.nextReview]
+      );
     }
   },
-  recentTopics(uid: string, limit: number) {
-    return open().prepare("SELECT * FROM TopicMastery WHERE userId=? ORDER BY lastSeen DESC LIMIT ?").all(uid, limit) as any[];
+  async recentTopics(uid: string, limit: number) {
+    const db = await getBackend();
+    return db.all("SELECT * FROM TopicMastery WHERE userId=? ORDER BY lastSeen DESC LIMIT ?", [uid, limit]);
   },
-  weakTopics(uid: string, limit: number) {
-    return open().prepare("SELECT * FROM TopicMastery WHERE userId=? AND isWeak=1 ORDER BY mastery ASC LIMIT ?").all(uid, limit) as any[];
+  async weakTopics(uid: string, limit: number) {
+    const db = await getBackend();
+    return db.all("SELECT * FROM TopicMastery WHERE userId=? AND isWeak=1 ORDER BY mastery ASC LIMIT ?", [uid, limit]);
   },
 
   // ---------------- Study sessions + AI history ----------------
-  createSession(s: { userId: string; title: string; subject: string; topic: string; difficulty: string; mode: string; sourceText: string }): string {
+  async createSession(s: { userId: string; title: string; subject: string; topic: string; difficulty: string; mode: string; sourceText: string }): Promise<string> {
+    const db = await getBackend();
     const sid = id();
-    open().prepare(
-      `INSERT INTO StudySession (id,userId,title,subject,topic,difficulty,mode,sourceText,createdAt) VALUES (?,?,?,?,?,?,?,?,?)`
-    ).run(sid, s.userId, s.title, s.subject, s.topic, s.difficulty, s.mode, s.sourceText, now());
+    await db.run(
+      `INSERT INTO StudySession (id,userId,title,subject,topic,difficulty,mode,sourceText,createdAt) VALUES (?,?,?,?,?,?,?,?,?)`,
+      [sid, s.userId, s.title, s.subject, s.topic, s.difficulty, s.mode, s.sourceText, now()]
+    );
     return sid;
   },
-  recentSessions(uid: string, limit: number) {
-    return open().prepare("SELECT * FROM StudySession WHERE userId=? ORDER BY createdAt DESC LIMIT ?").all(uid, limit) as any[];
+  async recentSessions(uid: string, limit: number) {
+    const db = await getBackend();
+    return db.all("SELECT * FROM StudySession WHERE userId=? ORDER BY createdAt DESC LIMIT ?", [uid, limit]);
   },
-  sessionsWithCounts(uid: string, limit: number) {
-    return open().prepare(
+  async sessionsWithCounts(uid: string, limit: number) {
+    const db = await getBackend();
+    return db.all(
       `SELECT s.*, (SELECT COUNT(*) FROM AiInteraction a WHERE a.sessionId = s.id) AS interactions
-       FROM StudySession s WHERE s.userId=? ORDER BY s.createdAt DESC LIMIT ?`
-    ).all(uid, limit) as any[];
+       FROM StudySession s WHERE s.userId=? ORDER BY s.createdAt DESC LIMIT ?`,
+      [uid, limit]
+    );
   },
-  createInteraction(i: { userId: string; sessionId: string | null; mode: string; prompt: string; response: string; model: string }) {
-    open().prepare(
-      `INSERT INTO AiInteraction (id,userId,sessionId,mode,prompt,response,model,createdAt) VALUES (?,?,?,?,?,?,?,?)`
-    ).run(id(), i.userId, i.sessionId, i.mode, i.prompt, i.response, i.model, now());
+  async createInteraction(i: { userId: string; sessionId: string | null; mode: string; prompt: string; response: string; model: string }) {
+    const db = await getBackend();
+    await db.run(
+      `INSERT INTO AiInteraction (id,userId,sessionId,mode,prompt,response,model,createdAt) VALUES (?,?,?,?,?,?,?,?)`,
+      [id(), i.userId, i.sessionId, i.mode, i.prompt, i.response, i.model, now()]
+    );
   },
 
   // ---------------- Study sets + flashcards ----------------
-  createSet(s: { userId: string; title: string; subject: string }): string {
+  async createSet(s: { userId: string; title: string; subject: string }): Promise<string> {
+    const db = await getBackend();
     const sid = id();
-    open().prepare(`INSERT INTO StudySet (id,userId,title,subject,createdAt) VALUES (?,?,?,?,?)`)
-      .run(sid, s.userId, s.title, s.subject, now());
+    await db.run(`INSERT INTO StudySet (id,userId,title,subject,createdAt) VALUES (?,?,?,?,?)`, [sid, s.userId, s.title, s.subject, now()]);
     return sid;
   },
-  createFlashcards(userId: string, setId: string | null, cards: { front: string; back: string; subject: string; topic: string }[]) {
-    const db = open();
-    const ins = db.prepare(
-      `INSERT INTO Flashcard (id,userId,setId,front,back,subject,topic,ease,interval,repetition,dueAt,createdAt)
-       VALUES (?,?,?,?,?,?,?,2.5,0,0,?,?)`
-    );
+  async createFlashcards(userId: string, setId: string | null, cards: { front: string; back: string; subject: string; topic: string }[]) {
+    const db = await getBackend();
     const t = now();
-    for (const c of cards) ins.run(id(), userId, setId, c.front, c.back, c.subject, c.topic, t, t);
-  },
-  dueFlashcards(uid: string, setId: string | null, limit: number) {
-    const db = open();
-    if (setId) {
-      return db.prepare("SELECT * FROM Flashcard WHERE userId=? AND setId=? AND dueAt<=? ORDER BY dueAt ASC LIMIT ?")
-        .all(uid, setId, now(), limit) as any[];
+    for (const c of cards) {
+      await db.run(
+        `INSERT INTO Flashcard (id,userId,setId,front,back,subject,topic,ease,interval,repetition,dueAt,createdAt)
+         VALUES (?,?,?,?,?,?,?,2.5,0,0,?,?)`,
+        [id(), userId, setId, c.front, c.back, c.subject, c.topic, t, t]
+      );
     }
-    return db.prepare("SELECT * FROM Flashcard WHERE userId=? AND dueAt<=? ORDER BY dueAt ASC LIMIT ?")
-      .all(uid, now(), limit) as any[];
   },
-  getFlashcard(uid: string, cardId: string) {
-    return open().prepare("SELECT * FROM Flashcard WHERE id=? AND userId=?").get(cardId, uid) as any | undefined;
+  async dueFlashcards(uid: string, setId: string | null, limit: number) {
+    const db = await getBackend();
+    if (setId) {
+      return db.all("SELECT * FROM Flashcard WHERE userId=? AND setId=? AND dueAt<=? ORDER BY dueAt ASC LIMIT ?", [uid, setId, now(), limit]);
+    }
+    return db.all("SELECT * FROM Flashcard WHERE userId=? AND dueAt<=? ORDER BY dueAt ASC LIMIT ?", [uid, now(), limit]);
   },
-  updateFlashcardSrs(cardId: string, d: { ease: number; interval: number; repetition: number; dueAt: string }) {
-    open().prepare("UPDATE Flashcard SET ease=?, interval=?, repetition=?, dueAt=? WHERE id=?")
-      .run(d.ease, d.interval, d.repetition, d.dueAt, cardId);
+  async getFlashcard(uid: string, cardId: string) {
+    const db = await getBackend();
+    return db.get("SELECT * FROM Flashcard WHERE id=? AND userId=?", [cardId, uid]);
   },
-  countDueFlashcards(uid: string): number {
-    return (open().prepare("SELECT COUNT(*) c FROM Flashcard WHERE userId=? AND dueAt<=?").get(uid, now()) as { c: number }).c;
+  async updateFlashcardSrs(cardId: string, d: { ease: number; interval: number; repetition: number; dueAt: string }) {
+    const db = await getBackend();
+    await db.run("UPDATE Flashcard SET ease=?, interval=?, repetition=?, dueAt=? WHERE id=?", [d.ease, d.interval, d.repetition, d.dueAt, cardId]);
   },
-  setsWithCounts(uid: string) {
-    return open().prepare(
+  async countDueFlashcards(uid: string): Promise<number> {
+    const db = await getBackend();
+    const r = await db.get("SELECT COUNT(*) AS c FROM Flashcard WHERE userId=? AND dueAt<=?", [uid, now()]);
+    return Number(r?.c ?? 0);
+  },
+  async setsWithCounts(uid: string) {
+    const db = await getBackend();
+    return db.all(
       `SELECT s.*,
         (SELECT COUNT(*) FROM Flashcard f WHERE f.setId=s.id) AS count,
         (SELECT COUNT(*) FROM Flashcard f WHERE f.setId=s.id AND f.dueAt<=?) AS due
-       FROM StudySet s WHERE s.userId=? ORDER BY s.createdAt DESC`
-    ).all(now(), uid) as any[];
+       FROM StudySet s WHERE s.userId=? ORDER BY s.createdAt DESC`,
+      [now(), uid]
+    );
   },
-  countSets(uid: string): number {
-    return (open().prepare("SELECT COUNT(*) c FROM StudySet WHERE userId=?").get(uid) as { c: number }).c;
+  async countSets(uid: string): Promise<number> {
+    const db = await getBackend();
+    const r = await db.get("SELECT COUNT(*) AS c FROM StudySet WHERE userId=?", [uid]);
+    return Number(r?.c ?? 0);
   },
 
   // ---------------- Quizzes + attempts ----------------
-  createQuiz(q: { setId?: string | null; title: string; subject: string; topic: string; difficulty: string; kind: string; questions: string }): string {
+  async createQuiz(q: { setId?: string | null; title: string; subject: string; topic: string; difficulty: string; kind: string; questions: string }): Promise<string> {
+    const db = await getBackend();
     const qid = id();
-    open().prepare(
-      `INSERT INTO Quiz (id,setId,title,subject,topic,difficulty,kind,questions,createdAt) VALUES (?,?,?,?,?,?,?,?,?)`
-    ).run(qid, q.setId ?? null, q.title, q.subject, q.topic, q.difficulty, q.kind, q.questions, now());
+    await db.run(
+      `INSERT INTO Quiz (id,setId,title,subject,topic,difficulty,kind,questions,createdAt) VALUES (?,?,?,?,?,?,?,?,?)`,
+      [qid, q.setId ?? null, q.title, q.subject, q.topic, q.difficulty, q.kind, q.questions, now()]
+    );
     return qid;
   },
-  createAttempt(a: { userId: string; quizId: string; score: number; total: number; xpEarned: number; coinsEarned: number }) {
-    open().prepare(
-      `INSERT INTO QuizAttempt (id,userId,quizId,score,total,xpEarned,coinsEarned,details,createdAt) VALUES (?,?,?,?,?,?,?,?,?)`
-    ).run(id(), a.userId, a.quizId, a.score, a.total, a.xpEarned, a.coinsEarned, "[]", now());
+  async createAttempt(a: { userId: string; quizId: string; score: number; total: number; xpEarned: number; coinsEarned: number }) {
+    const db = await getBackend();
+    await db.run(
+      `INSERT INTO QuizAttempt (id,userId,quizId,score,total,xpEarned,coinsEarned,details,createdAt) VALUES (?,?,?,?,?,?,?,?,?)`,
+      [id(), a.userId, a.quizId, a.score, a.total, a.xpEarned, a.coinsEarned, "[]", now()]
+    );
   },
-  recentAttempts(uid: string, limit: number) {
-    return open().prepare(
+  async recentAttempts(uid: string, limit: number) {
+    const db = await getBackend();
+    return db.all(
       `SELECT qa.*, q.title AS quizTitle FROM QuizAttempt qa JOIN Quiz q ON q.id = qa.quizId
-       WHERE qa.userId=? ORDER BY qa.createdAt DESC LIMIT ?`
-    ).all(uid, limit) as any[];
+       WHERE qa.userId=? ORDER BY qa.createdAt DESC LIMIT ?`,
+      [uid, limit]
+    );
   },
 
   // ---------------- Cosmetics ----------------
-  ownedCosmetics(uid: string): string[] {
-    return (open().prepare("SELECT cosmeticId FROM UserCosmetic WHERE userId=?").all(uid) as any[]).map((r) => r.cosmeticId);
+  async ownedCosmetics(uid: string): Promise<string[]> {
+    const db = await getBackend();
+    return (await db.all("SELECT cosmeticId FROM UserCosmetic WHERE userId=?", [uid])).map((r) => r.cosmeticId);
   },
-  hasCosmetic(uid: string, cosmeticId: string): boolean {
-    return !!open().prepare("SELECT 1 FROM UserCosmetic WHERE userId=? AND cosmeticId=?").get(uid, cosmeticId);
+  async hasCosmetic(uid: string, cosmeticId: string): Promise<boolean> {
+    const db = await getBackend();
+    return !!(await db.get("SELECT 1 AS x FROM UserCosmetic WHERE userId=? AND cosmeticId=?", [uid, cosmeticId]));
   },
-  grantCosmetic(uid: string, cosmeticId: string) {
-    open().prepare("INSERT OR IGNORE INTO UserCosmetic (id,userId,cosmeticId,equipped,acquiredAt) VALUES (?,?,?,0,?)")
-      .run(id(), uid, cosmeticId, now());
+  async grantCosmetic(uid: string, cosmeticId: string) {
+    const db = await getBackend();
+    await db.run("INSERT OR IGNORE INTO UserCosmetic (id,userId,cosmeticId,equipped,acquiredAt) VALUES (?,?,?,0,?)", [id(), uid, cosmeticId, now()]);
   },
   isDefaultOwned(cosmeticId: string) {
     return DEFAULT_OWNED.includes(cosmeticId);

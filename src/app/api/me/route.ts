@@ -8,7 +8,7 @@ export async function GET() {
     const session = await getCurrentUser();
     if (!session) return ok({ user: null });
 
-    const u = store.getUserById(session.id)!;
+    const u = (await store.getUserById(session.id))!;
     const used = u.dailyUsageDay === todayKey() ? u.dailyUsage : 0;
 
     return ok({
