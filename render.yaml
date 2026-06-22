@@ -18,5 +18,13 @@ services:
         generateValue: true         # Render generates a strong secret for you
       - key: AI_PROVIDER
         value: mock                 # keeps the public app free (no API cost). Set to "anthropic" + add ANTHROPIC_API_KEY to enable real Claude.
+      - key: AI_MODEL
+        value: claude-sonnet-4-6
+      # Add these in the Render dashboard if you want accounts/progress to persist across deploys and restarts.
+      # Without Turso, the app still runs, but Render's local filesystem is not permanent.
+      # - key: TURSO_DATABASE_URL
+      #   sync: false
+      # - key: TURSO_AUTH_TOKEN
+      #   sync: false
       # - key: ANTHROPIC_API_KEY
       #   sync: false               # add in the Render dashboard if you enable real AI
