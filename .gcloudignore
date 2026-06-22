@@ -1,0 +1,9 @@
+# Files Cloud Build / Cloud Run should ignore when deploying from source.
+node_modules
+.next
+.git
+*.db
+*.db-journal
+*.log
+.env
+.env*.local
