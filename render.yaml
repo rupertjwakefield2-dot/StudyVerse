@@ -1,0 +1,22 @@
+# Render.com Blueprint — one-click deploy to a permanent, free, public URL.
+# In Render: New ▸ Blueprint ▸ connect this repo. It reads this file.
+services:
+  - type: web
+    name: synapse
+    runtime: node
+    plan: free                      # free tier: permanent *.onrender.com URL, sleeps when idle
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "24"                 # node:sqlite ships with Node 24 (no flag needed)
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true         # Render generates a strong secret for you
+      - key: AI_PROVIDER
+        value: mock                 # keeps the public app free (no API cost). Set to "anthropic" + add ANTHROPIC_API_KEY to enable real Claude.
+      # - key: ANTHROPIC_API_KEY
+      #   sync: false               # add in the Render dashboard if you enable real AI
