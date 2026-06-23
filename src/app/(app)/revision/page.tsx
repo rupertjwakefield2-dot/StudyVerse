@@ -148,9 +148,17 @@ function ReviewTab() {
   );
 }
 
+// Literal class strings — Tailwind can't see interpolated class names, so map them explicitly.
+const GRADE_TONES: Record<string, string> = {
+  coral: "border border-coral/40 bg-coral/10 text-coral hover:bg-coral/20",
+  gold:  "border border-gold/40 bg-gold/10 text-gold hover:bg-gold/20",
+  iris:  "border border-iris/40 bg-iris/10 text-iris hover:bg-iris/20",
+  lime:  "border border-lime/40 bg-lime/10 text-lime hover:bg-lime/20",
+};
+
 function GradeBtn({ label, tone, onClick }: { label: string; tone: string; onClick: () => void }) {
   return (
-    <button onClick={onClick} className={`btn border border-${tone}/40 bg-${tone}/10 text-${tone} hover:bg-${tone}/20`}>
+    <button onClick={onClick} className={`btn ${GRADE_TONES[tone] ?? GRADE_TONES.iris}`}>
       {label}
     </button>
   );

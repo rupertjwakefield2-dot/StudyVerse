@@ -24,6 +24,13 @@ const colorClass: Record<string, { on: string; text: string }> = {
   iris:  { on: "bg-iris/20 border-iris/60 text-iris",  text: "text-iris" },
 };
 
+// Five teaching periods per day (replaces AM/PM)
+const PERIODS = ["P1", "P2", "P3", "P4", "P5"] as const;
+
+// Lateness consequences
+const LATE_BP_THRESHOLD = 5;   // more than 5 min late → a behaviour point
+const LATE_DT_THRESHOLD = 25;  // 25+ min late → a detention
+
 // SIMS-style pupil avatar colours, derived from the name so they stay stable
 const AVATAR_COLORS = ["bg-iris/20 text-iris", "bg-lime/20 text-lime", "bg-gold/20 text-gold", "bg-coral/20 text-coral"];
 function avatarColor(name: string) {
@@ -54,7 +61,7 @@ export default function RegisterPage() {
   const [classGroup, setClassGroup] = useState("My Class");
   const [roster, setRoster] = useState<Student[]>([]);
   const [date, setDate] = useState(today);
-  const [session, setSession] = useState<"AM" | "PM">("AM");
+  const [session, setSession] = useState<string>("P1");
   const [marks, setMarks] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -63,6 +70,12 @@ export default function RegisterPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [bulkNames, setBulkNames] = useState("");
   const [newGroup, setNewGroup] = useState("");
+
+  // Late (right-click) modal state
+  const [lateModal, setLateModal] = useState<{ name: string } | null>(null);
+  const [lateMins, setLateMins] = useState(10);
+  const [lateBusy, setLateBusy] = useState(false);
+  const [toast, setToast] = useState("");
 
   const loadRoster = useCallback(async (group: string) => {
     const res = await fetch(`/api/teacher/register/roster?classGroup=${encodeURIComponent(group)}`);
@@ -140,6 +153,36 @@ export default function RegisterPage() {
     await loadRoster(classGroup);
   }
 
+  function openLate(name: string) {
+    setLateModal({ name });
+    setLateMins(10);
+  }
+
+  async function submitLate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!lateModal) return;
+    setLateBusy(true);
+    try {
+      const res = await fetch("/api/teacher/register/late", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentName: lateModal.name, classGroup, date, session, minutes: lateMins }),
+      });
+      const data = await res.json();
+      // Reflect the late mark immediately
+      setMark(lateModal.name, "late");
+      // Build a result message
+      const parts = [`${lateModal.name} marked late (${lateMins} min)`];
+      if (data.detention) parts.push("→ 30-min detention issued (25+ min late)");
+      else if (data.behaviourPoint) parts.push("→ 1 behaviour point (over 5 min late)");
+      if (data.detentionsCreated > 0 && !data.detention) parts.push(`→ ${data.detentionsCreated} threshold detention(s)`);
+      setToast(parts.join(" "));
+      setTimeout(() => setToast(""), 5000);
+      setLateModal(null);
+    } finally {
+      setLateBusy(false);
+    }
+  }
+
   // SIMS-style attendance statistics
   const possible = roster.length;
   const presentCount = roster.filter((s) => (marks[s.name] || "present") === "present").length;
@@ -177,7 +220,7 @@ export default function RegisterPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-bold text-ink">Attendance Register</h1>
-          <p className="mt-1 text-sm text-muted">Take the register SIMS-style — tap a mark for each pupil, then save.</p>
+          <p className="mt-1 text-sm text-muted">Tap a mark for each pupil, then save. <span className="text-faint">Right-click a name to log a late arrival.</span></p>
         </div>
         {roster.length > 0 && (
           <div className="flex items-center gap-2">
@@ -207,11 +250,11 @@ export default function RegisterPage() {
           <input type="date" className="input mt-1" value={date} onChange={(e) => setDate(e.target.value)} />
         </div>
         <div>
-          <label className="label">Session</label>
+          <label className="label">Period</label>
           <div className="mt-1 flex gap-1 rounded-xl border border-border bg-surface-2 p-1">
-            {(["AM", "PM"] as const).map((s) => (
+            {PERIODS.map((s) => (
               <button key={s} onClick={() => setSession(s)}
-                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${session === s ? "bg-surface text-ink shadow-sm" : "text-muted"}`}>
+                className={`rounded-lg px-2.5 py-1.5 text-sm font-medium transition ${session === s ? "bg-surface text-ink shadow-sm" : "text-muted"}`}>
                 {s}
               </button>
             ))}
@@ -251,7 +294,11 @@ export default function RegisterPage() {
                 <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-bold ${avatarColor(s.name)}`}>
                   {initials(s.name)}
                 </div>
-                <div className="min-w-0 flex-1">
+                <div
+                  className="min-w-0 flex-1 cursor-context-menu select-none"
+                  onContextMenu={(e) => { e.preventDefault(); openLate(s.name); }}
+                  title="Right-click to log a late arrival"
+                >
                   <div className="font-medium text-ink truncate">{simsName(s.name)}</div>
                   <div className="text-[11px] text-faint">{isRegistered ? "Registered" : "Not yet registered"}</div>
                 </div>
@@ -343,6 +390,60 @@ export default function RegisterPage() {
               <button type="submit" className="btn-primary w-full">Add to register</button>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Late arrival modal (right-click a name) */}
+      {lateModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setLateModal(null)} />
+          <div className="card relative w-full max-w-sm p-5">
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="font-display font-semibold text-ink">Log late arrival</h2>
+              <button onClick={() => setLateModal(null)} className="btn-ghost h-8 w-8 !px-0"><Icon.X className="h-4 w-4" /></button>
+            </div>
+            <p className="text-sm text-muted mb-4">{simsName(lateModal.name)}</p>
+            <form onSubmit={submitLate} className="space-y-4">
+              <div>
+                <label className="label">Minutes late</label>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {[2, 5, 10, 15, 25, 30].map((n) => (
+                    <button key={n} type="button" onClick={() => setLateMins(n)}
+                      className={`chip cursor-pointer transition ${lateMins === n ? "border-gold/60 bg-gold/15 text-gold font-bold" : "hover:border-gold/40"}`}>
+                      {n}m
+                    </button>
+                  ))}
+                </div>
+                <input type="number" min={1} max={300} value={lateMins}
+                  onChange={(e) => setLateMins(Number(e.target.value))}
+                  className="input mt-2 w-28" />
+              </div>
+
+              {/* Live consequence preview */}
+              <div className={`rounded-xl border px-3 py-2 text-sm ${
+                lateMins >= LATE_DT_THRESHOLD ? "border-coral/40 bg-coral/10 text-coral"
+                : lateMins > LATE_BP_THRESHOLD ? "border-gold/40 bg-gold/10 text-gold"
+                : "border-border bg-surface-2 text-muted"
+              }`}>
+                {lateMins >= LATE_DT_THRESHOLD
+                  ? "⚠️ 25+ min late → a 30-min detention will be issued."
+                  : lateMins > LATE_BP_THRESHOLD
+                  ? "⚡ Over 5 min late → 1 behaviour point will be added."
+                  : "Marked late only — no behaviour point (5 min or under)."}
+              </div>
+
+              <button type="submit" disabled={lateBusy} className="btn-primary w-full bg-gold text-black">
+                {lateBusy ? "Saving…" : "Log late arrival"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm text-ink shadow-lg">
+          {toast}
         </div>
       )}
     </div>

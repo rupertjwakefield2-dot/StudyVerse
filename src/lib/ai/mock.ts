@@ -113,17 +113,52 @@ export class MockProvider implements AIProvider {
   }): Promise<FlashcardResponse> {
     const meta = detectMeta(`${opts.subject ?? ""} ${opts.sourceText}`);
     const subject = opts.subject || meta.subject;
-    const terms = keyTerms(opts.sourceText, opts.count);
-    const cards = terms.slice(0, opts.count).map((t) => ({
-      front: `What is ${t}?`,
-      back: `${capitalize(t)} — ${firstSentenceContaining(opts.sourceText, t) || `a key idea in ${meta.topic}.`}`,
-      topic: meta.topic,
-    }));
+    const topic = meta.topic;
+    const cards: { front: string; back: string; topic: string }[] = [];
+    const seen = new Set<string>();
+
+    // 1. If real notes are pasted, build definition cards from the actual sentences.
+    const stripped = opts.sourceText.replace(/^(make|create|generate)[^.!?\n]{0,60}[.!?\n]?/i, "").trim();
+    if (stripped.length > 200) {
+      for (const q of extractFromText(stripped, topic, "medium")) {
+        if (cards.length >= opts.count) break;
+        const front = q.prompt;
+        if (seen.has(front)) continue;
+        seen.add(front);
+        cards.push({ front, back: q.explanation, topic });
+      }
+    }
+
+    // 2. Fill from the curated topic bank — turn each Q&A into a strong card.
+    if (cards.length < opts.count) {
+      const bank = getTopicBank(topic, subject, "medium");
+      for (const q of shuffleArray(bank)) {
+        if (cards.length >= opts.count) break;
+        if (seen.has(q.prompt)) continue;
+        seen.add(q.prompt);
+        const answer = q.choices[q.answerIndex];
+        cards.push({ front: q.prompt, back: `${answer}. ${q.explanation}`, topic: q.topic });
+      }
+    }
+
+    // 3. Last resort: key-term cards from the text, then prompts to self-author.
+    if (cards.length < opts.count) {
+      for (const t of keyTerms(opts.sourceText, opts.count)) {
+        if (cards.length >= opts.count) break;
+        const front = `What is ${t}?`;
+        if (seen.has(front)) continue;
+        const sentence = firstSentenceContaining(opts.sourceText, t);
+        if (!sentence && stripped.length < 50) continue; // skip junk when there's no real source
+        seen.add(front);
+        cards.push({ front, back: `${capitalize(t)} — ${sentence || `a key idea in ${topic}.`}`, topic });
+      }
+    }
     while (cards.length < opts.count) {
       const n = cards.length + 1;
-      cards.push({ front: `Define key term #${n} for ${meta.topic}`, back: `Add your own definition while revising — active recall makes it stick.`, topic: meta.topic });
+      cards.push({ front: `Key idea #${n} for ${topic}`, back: `Write the definition in your own words — active recall makes it stick.`, topic });
     }
-    return { title: `${meta.topic} — flashcards`, subject, cards };
+
+    return { title: `${topic} — flashcards`, subject, cards: cards.slice(0, opts.count) };
   }
 }
 
