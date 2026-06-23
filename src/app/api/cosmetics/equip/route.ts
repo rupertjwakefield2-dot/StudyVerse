@@ -19,7 +19,8 @@ export async function POST(req: Request) {
       return bad("You don't own this item yet.", 403);
     }
 
-    await store.updateUser(user.id, { avatar: item.id });
+    const field = item.type === "background" ? "background" : item.type === "nametag" ? "nametag" : "avatar";
+    await store.updateUser(user.id, { [field]: item.id });
     return ok({ equipped: item.id });
   });
 }

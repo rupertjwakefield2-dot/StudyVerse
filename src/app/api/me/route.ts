@@ -17,6 +17,8 @@ export async function GET() {
         name: u.name,
         email: u.email,
         avatar: u.avatar,
+        background: u.background,
+        nametag: u.nametag,
         isPremium: u.isPremium,
         xp: u.xp,
         level: u.level,

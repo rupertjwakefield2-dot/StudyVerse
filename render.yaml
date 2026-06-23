@@ -28,3 +28,10 @@ services:
       #   sync: false
       # - key: ANTHROPIC_API_KEY
       #   sync: false               # add in the Render dashboard if you enable real AI
+      # Stripe (optional — for real $10 checkout instead of dev bypass):
+      # - key: STRIPE_SECRET_KEY
+      #   sync: false
+      # - key: STRIPE_WEBHOOK_SECRET
+      #   sync: false               # get from: stripe listen --forward-to <your-render-url>/api/webhooks/payment
+      # - key: NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+      #   sync: false

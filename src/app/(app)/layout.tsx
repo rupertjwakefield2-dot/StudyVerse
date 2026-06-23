@@ -16,6 +16,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     name: u.name,
     email: u.email,
     avatar: u.avatar,
+    background: u.background,
+    nametag: u.nametag,
     isPremium: u.isPremium,
     xp: u.xp,
     level: u.level,

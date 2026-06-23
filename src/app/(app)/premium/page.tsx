@@ -1,39 +1,57 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { useUser } from "@/components/user-provider";
 
 const BENEFITS = [
-  { icon: "Bolt", title: "Unlimited everything", body: "No daily caps on tutoring, quizzes, or flashcards. Learn as much as you want." },
-  { icon: "Brain", title: "Deeper tutoring modes", body: "Advanced, multi-layered explanations and Socratic deep-dives on hard problems." },
-  { icon: "Mic", title: "Full voice AI tutor", body: "Auto-read explanations, adaptive pace, and conversational coaching." },
-  { icon: "Flame", title: "1.5× XP & coins", body: "Level up faster and earn enhanced rewards across every game." },
-  { icon: "Crown", title: "Exclusive cosmetics", body: "Unlock the legendary Wizard and Phoenix avatars and premium themes." },
-  { icon: "Target", title: "Priority adaptive engine", body: "Smarter weak-topic detection and tighter spaced-repetition tuning." },
+  { icon: "Bolt", title: "Unlimited everything", body: "No daily caps on tutoring, quizzes, or flashcards." },
+  { icon: "Brain", title: "Deeper tutoring modes", body: "Advanced explanations and Socratic deep-dives." },
+  { icon: "Mic", title: "Full voice AI tutor", body: "Auto-read explanations with adaptive pace." },
+  { icon: "Flame", title: "1.5× XP & coins", body: "Level up faster across every game." },
+  { icon: "Crown", title: "All game modes", body: "Unlock Crypto Hack, Kingdom Manager, and more." },
+  { icon: "Target", title: "Priority adaptive engine", body: "Smarter weak-topic detection and spaced repetition." },
 ] as const;
 
 export default function PremiumPage() {
   const { me, refresh } = useUser();
+  const params = useSearchParams();
+  const success = params.get("success");
+  const reason = params.get("reason");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [polling, setPolling] = useState(false);
+
+  // After Stripe redirect back, poll until webhook has set isPremium
+  useEffect(() => {
+    if (!success || me?.isPremium) return;
+    setPolling(true);
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      await refresh();
+      if (me?.isPremium || attempts >= 12) {
+        clearInterval(interval);
+        setPolling(false);
+      }
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [success]);
 
   async function upgrade() {
-    setLoading(true);
-    setError("");
+    setLoading(true); setError("");
     try {
-      const res = await fetch("/api/premium/unlock", { method: "POST" });
+      const res = await fetch("/api/premium/checkout", { method: "POST" });
       const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Couldn't complete the upgrade.");
+      if (!res.ok) { setError(data.error || "Couldn't start checkout."); return; }
+      if (data.devBypass) {
+        await refresh();
         return;
       }
-      await refresh();
-    } catch {
-      setError("Network error.");
-    } finally {
-      setLoading(false);
-    }
+      window.location.href = data.url;
+    } catch { setError("Network error."); }
+    finally { setLoading(false); }
   }
 
   if (me?.isPremium) {
@@ -46,7 +64,7 @@ export default function PremiumPage() {
               <Icon.Crown className="h-8 w-8" />
             </div>
             <h1 className="mt-4 font-display text-2xl font-bold text-ink">You're Premium ✨</h1>
-            <p className="mt-2 text-muted">Unlimited access unlocked. Go make the most of it.</p>
+            <p className="mt-2 text-muted">All game modes, unlimited AI, and 1.5× rewards unlocked.</p>
             <div className="mt-6 grid gap-2 text-left sm:grid-cols-2">
               {BENEFITS.map((b) => (
                 <div key={b.title} className="flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm">
@@ -55,24 +73,46 @@ export default function PremiumPage() {
                 </div>
               ))}
             </div>
+            <a href="/games" className="btn-primary mt-6 inline-flex bg-gold text-black">
+              <Icon.Game className="h-4 w-4" /> Play all game modes
+            </a>
           </div>
         </div>
+      </div>
+    );
+  }
 
-        <PremiumAssistant />
+  if (polling && success) {
+    return (
+      <div className="mx-auto max-w-md text-center py-20">
+        <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-gold/15 text-gold animate-pulse">
+          <Icon.Crown className="h-8 w-8" />
+        </div>
+        <h2 className="mt-4 font-display text-xl font-bold text-ink">Payment confirmed!</h2>
+        <p className="mt-2 text-muted">Activating your premium access…</p>
+        <div className="mt-4 h-1.5 w-48 mx-auto rounded-full bg-surface-2 overflow-hidden">
+          <div className="h-full bg-gold rounded-full animate-pulse" style={{ width: "60%" }} />
+        </div>
       </div>
     );
   }
 
   return (
     <div className="mx-auto max-w-3xl">
+      {reason === "game" && (
+        <div className="mb-6 rounded-xl border border-gold/40 bg-gold/10 px-4 py-3 text-sm text-gold flex items-center gap-2">
+          <Icon.Crown className="h-4 w-4 shrink-0" />
+          This game mode requires Premium. Upgrade to unlock all modes instantly.
+        </div>
+      )}
+
       <div className="text-center">
         <span className="chip mx-auto border-gold/40 bg-gold/10 text-gold">
           <Icon.Crown className="h-4 w-4" /> One-time payment · yours forever
         </span>
         <h1 className="mt-4 font-display text-3xl font-bold text-ink">Unlock Synapse Premium</h1>
         <p className="mx-auto mt-2 max-w-lg text-muted">
-          A single <span className="font-semibold text-ink">$10</span> payment — no subscription — unlocks the
-          full experience for good.
+          A single <span className="font-semibold text-ink">$10</span> payment — no subscription — unlocks the full experience permanently.
         </p>
       </div>
 
@@ -92,39 +132,19 @@ export default function PremiumPage() {
       </div>
 
       {error && (
-        <div className="mt-6 rounded-xl border border-coral/40 bg-coral/10 px-3 py-2 text-center text-sm text-coral">
-          {error}
-        </div>
+        <div className="mt-6 rounded-xl border border-coral/40 bg-coral/10 px-3 py-2 text-center text-sm text-coral">{error}</div>
       )}
 
       <div className="card mt-6 flex flex-col items-center gap-3 border-gold/40 p-6 text-center">
         <div className="font-display text-4xl font-bold text-ink">$10<span className="text-base font-normal text-faint"> once</span></div>
         <button onClick={upgrade} disabled={loading} className="btn-primary w-full max-w-xs bg-gold py-3 text-black">
-          {loading ? "Processing…" : "Upgrade to Premium"}
+          {loading ? "Redirecting to checkout…" : "Upgrade to Premium"}
           {!loading && <Icon.Crown className="h-4 w-4" />}
         </button>
-        <p className="text-xs text-faint">
-          Demo build: this grants premium instantly. Add Stripe keys in <code className="font-mono">.env</code> for real checkout.
-        </p>
+        {!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY && (
+          <p className="text-xs text-faint">No Stripe keys configured — clicking upgrades instantly (dev mode).</p>
+        )}
       </div>
-    </div>
-  );
-}
-
-function PremiumAssistant() {
-  return (
-    <div className="card mt-6 p-6">
-      <div className="flex items-center gap-2">
-        <Icon.Brain className="h-5 w-5 text-gold" />
-        <h2 className="font-display font-semibold text-ink">Premium Study Coach</h2>
-      </div>
-      <p className="mt-1 text-sm text-muted">
-        Your dedicated assistant with deeper reasoning and full voice. Head to the tutor — explanations now
-        auto-read aloud and go a level deeper on hard problems.
-      </p>
-      <a href="/tutor" className="btn-primary mt-4 inline-flex bg-gold text-black">
-        Open the coach <Icon.Arrow className="h-4 w-4" />
-      </a>
     </div>
   );
 }

@@ -89,6 +89,7 @@ function Shop() {
   const [data, setData] = useState<any | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [filter, setFilter] = useState<"character" | "background" | "nametag">("character");
 
   const load = () => fetch("/api/cosmetics").then((r) => r.json()).then(setData);
   useEffect(() => { load(); }, []);
@@ -104,16 +105,28 @@ function Shop() {
   }
 
   if (!data) return <Grid />;
+  const items = data.items.filter((c: any) => c.type === filter);
   return (
     <div>
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className="chip border-gold/40 text-gold"><Icon.Coin className="h-4 w-4" /> {data.coins} coins</span>
+        <div className="flex gap-1 rounded-xl border border-border bg-surface-2 p-1">
+          {(["character", "background", "nametag"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setFilter(t)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition ${filter === t ? "bg-iris text-white" : "text-muted hover:text-ink"}`}
+            >
+              {t}s
+            </button>
+          ))}
+        </div>
         {error && <span className="text-sm text-coral">{error}</span>}
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        {data.items.map((c: any) => (
+        {items.map((c: any) => (
           <div key={c.id} className={`card flex flex-col items-center p-4 text-center ${c.equipped ? "ring-2 ring-iris" : ""}`}>
-            <span className="grid h-16 w-16 place-items-center rounded-full border border-border bg-surface-2 text-3xl">{c.emoji}</span>
+            <CosmeticPreview item={c} />
             <div className="mt-2 font-medium text-ink">{c.name}</div>
             <span className={`mt-1 rounded-full border px-2 py-0.5 text-[10px] font-medium capitalize ${rarityColor(c.rarity)}`}>{c.rarity}</span>
             {c.premium && <span className="mt-1 text-[10px] text-gold">Premium</span>}
@@ -133,6 +146,28 @@ function Shop() {
         ))}
       </div>
     </div>
+  );
+}
+
+function CosmeticPreview({ item }: { item: any }) {
+  if (item.type === "background") {
+    return (
+      <span className="grid h-16 w-20 place-items-center rounded-xl border border-border bg-surface-2 text-[10px] font-bold text-ink">
+        {item.preview}
+      </span>
+    );
+  }
+  if (item.type === "nametag") {
+    return (
+      <span className="grid h-16 w-24 place-items-center rounded-xl border border-border bg-surface-2 px-2 text-xs font-semibold text-iris">
+        {item.preview}
+      </span>
+    );
+  }
+  return (
+    <span className="grid h-16 w-16 place-items-center rounded-full border border-border bg-surface-2 font-display text-xl font-bold text-iris">
+      {item.preview.slice(0, 2).toUpperCase()}
+    </span>
   );
 }
 

@@ -3,18 +3,28 @@
 import { Icon } from "./icons";
 import { COSMETIC_MAP } from "@/lib/cosmetics";
 
-/** Cosmetic avatars are emoji-backed so there are no image assets to ship. */
 export function Avatar({ keyName, size = 40 }: { keyName: string; size?: number }) {
-  const a = COSMETIC_MAP.get(keyName) ?? COSMETIC_MAP.get("fox")!;
+  const a = COSMETIC_MAP.get(keyName) ?? COSMETIC_MAP.get("spark")!;
+  const initials = a.preview.slice(0, 2).toUpperCase();
   return (
     <span
-      className="grid place-items-center rounded-full border border-border bg-surface-2"
-      style={{ width: size, height: size, fontSize: size * 0.55 }}
+      className="grid place-items-center rounded-full border border-border bg-surface-2 font-display font-bold text-iris"
+      style={{ width: size, height: size, fontSize: size * 0.32 }}
       title={a.name}
     >
-      {a.emoji}
+      {initials}
     </span>
   );
+}
+
+export function backgroundClass(keyName: string) {
+  switch (keyName) {
+    case "paper-desk": return "bg-[radial-gradient(circle_at_top_left,rgb(var(--gold)/0.12),transparent_35%),rgb(var(--bg))]";
+    case "arcade-pop": return "bg-[linear-gradient(135deg,rgb(var(--iris)/0.18),transparent_36%),linear-gradient(315deg,rgb(var(--coral)/0.16),transparent_40%),rgb(var(--bg))]";
+    case "aurora-lab": return "bg-[radial-gradient(circle_at_20%_0%,rgb(var(--lime)/0.14),transparent_35%),radial-gradient(circle_at_80%_15%,rgb(var(--iris)/0.18),transparent_36%),rgb(var(--bg))]";
+    case "gold-stage": return "bg-[radial-gradient(circle_at_50%_0%,rgb(var(--gold)/0.2),transparent_42%),rgb(var(--bg))]";
+    default: return "bg-bg";
+  }
 }
 
 export function StatPill({

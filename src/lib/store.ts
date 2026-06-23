@@ -95,7 +95,9 @@ async function migrate(db: Backend) {
   await db.execScript(`
   CREATE TABLE IF NOT EXISTS User (
     id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
-    passwordHash TEXT NOT NULL, avatar TEXT NOT NULL DEFAULT 'fox',
+    passwordHash TEXT NOT NULL, avatar TEXT NOT NULL DEFAULT 'spark',
+    background TEXT NOT NULL DEFAULT 'midnight-grid',
+    nametag TEXT NOT NULL DEFAULT 'rookie',
     createdAt TEXT NOT NULL, isPremium INTEGER NOT NULL DEFAULT 0, premiumSince TEXT,
     xp INTEGER NOT NULL DEFAULT 0, level INTEGER NOT NULL DEFAULT 1,
     coins INTEGER NOT NULL DEFAULT 0, streak INTEGER NOT NULL DEFAULT 0,
@@ -156,7 +158,25 @@ async function migrate(db: Backend) {
   CREATE INDEX IF NOT EXISTS idx_topic_user ON TopicMastery(userId, isWeak);
   CREATE INDEX IF NOT EXISTS idx_flash_due ON Flashcard(userId, dueAt);
   CREATE INDEX IF NOT EXISTS idx_ai_user ON AiInteraction(userId, createdAt);
+  CREATE TABLE IF NOT EXISTS GameSession (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    usedAt TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_gamesession_user ON GameSession(userId, mode, usedAt);
   `);
+  await addColumnIfMissing(db, "User", "background", "TEXT NOT NULL DEFAULT 'midnight-grid'");
+  await addColumnIfMissing(db, "User", "nametag", "TEXT NOT NULL DEFAULT 'rookie'");
+  await addColumnIfMissing(db, "User", "stripeCustomerId", "TEXT");
+}
+
+async function addColumnIfMissing(db: Backend, table: string, column: string, definition: string) {
+  const columns = await db.all(`PRAGMA table_info(${table})`);
+  if (!columns.some((c) => c.name === column)) {
+    await db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }
 
 async function seed(db: Backend) {
@@ -164,7 +184,7 @@ async function seed(db: Backend) {
   if (Number(row?.c ?? 0) === 0) {
     for (const c of COSMETICS) {
       await db.run("INSERT INTO Cosmetic (id,name,type,price,rarity,premium) VALUES (?,?,?,?,?,?)", [
-        c.id, c.name, "avatar", c.price, c.rarity, c.premium ? 1 : 0,
+        c.id, c.name, c.type, c.price, c.rarity, c.premium ? 1 : 0,
       ]);
     }
   }
@@ -177,9 +197,9 @@ async function seedDemo(db: Backend) {
   const uid = randomUUID();
   const today = new Date().toISOString().slice(0, 10);
   await db.run(
-    `INSERT INTO User (id,email,name,passwordHash,avatar,createdAt,xp,level,coins,streak,longestStreak,lastActiveDay)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [uid, "demo@synapse.app", "Demo Student", bcrypt.hashSync("demo1234", 10), "panda", now(), 640, 4, 320, 5, 9, today]
+    `INSERT INTO User (id,email,name,passwordHash,avatar,background,nametag,createdAt,xp,level,coins,streak,longestStreak,lastActiveDay)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [uid, "demo@synapse.app", "Demo Student", bcrypt.hashSync("demo1234", 10), "orbit", "arcade-pop", "quizsmith", now(), 640, 4, 320, 5, 9, today]
   );
 
   const topics: [string, string, number, number][] = [
@@ -216,6 +236,7 @@ const bool = (v: unknown) => v === 1 || v === true || v === "1";
 
 export interface UserRow {
   id: string; email: string; name: string; passwordHash: string; avatar: string;
+  background: string; nametag: string;
   createdAt: string; isPremium: boolean; premiumSince: string | null;
   xp: number; level: number; coins: number; streak: number; longestStreak: number;
   lastActiveDay: string | null; dailyUsage: number; dailyUsageDay: string | null;
@@ -242,7 +263,7 @@ export const store = {
     const uid = id();
     await db.run(
       `INSERT INTO User (id,email,name,passwordHash,avatar,createdAt) VALUES (?,?,?,?,?,?)`,
-      [uid, input.email.toLowerCase(), input.name, input.passwordHash, input.avatar ?? "fox", now()]
+      [uid, input.email.toLowerCase(), input.name, input.passwordHash, input.avatar ?? "spark", now()]
     );
     return (await this.getUserById(uid))!;
   },
@@ -414,5 +435,29 @@ export const store = {
   },
   isDefaultOwned(cosmeticId: string) {
     return DEFAULT_OWNED.includes(cosmeticId);
+  },
+
+  // ---------------- Game sessions (anti-tab-farming) ----------------
+  async createGameSession(uid: string, mode: string): Promise<string> {
+    const db = await getBackend();
+    const sid = id();
+    // Expire any previous unclaimed sessions for this user+mode
+    await db.run("DELETE FROM GameSession WHERE userId=? AND mode=? AND usedAt IS NULL", [uid, mode]);
+    await db.run("INSERT INTO GameSession (id,userId,mode,createdAt) VALUES (?,?,?,?)", [sid, uid, mode, now()]);
+    return sid;
+  },
+  async consumeGameSession(uid: string, sessionId: string): Promise<boolean> {
+    const db = await getBackend();
+    const row = await db.get("SELECT id FROM GameSession WHERE id=? AND userId=? AND usedAt IS NULL", [sessionId, uid]);
+    if (!row) return false;
+    await db.run("UPDATE GameSession SET usedAt=? WHERE id=?", [now(), sessionId]);
+    return true;
+  },
+
+  // ---------------- Stripe ----------------
+  async getUserByStripeCustomer(customerId: string): Promise<UserRow | null> {
+    const db = await getBackend();
+    const r = await db.get("SELECT * FROM User WHERE stripeCustomerId=?", [customerId]);
+    return r ? mapUser(r) : null;
   },
 };

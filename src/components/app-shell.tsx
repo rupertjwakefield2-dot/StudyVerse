@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { Logo } from "./brand";
 import { Icon } from "./icons";
-import { Avatar, StatPill } from "./ui";
+import { Avatar, StatPill, backgroundClass } from "./ui";
 import { useUser } from "./user-provider";
 import { useTheme } from "./theme-provider";
 
@@ -15,6 +15,7 @@ const NAV = [
   { href: "/revision", label: "Revision", icon: "Cards" as const },
   { href: "/games", label: "Games", icon: "Game" as const },
   { href: "/library", label: "Library", icon: "Library" as const },
+  { href: "/shop", label: "Shop", icon: "Coin" as const },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -63,7 +64,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="min-h-screen bg-bg">
+    <div className={`min-h-screen ${backgroundClass(me?.background ?? "midnight-grid")}`}>
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col border-r border-border bg-surface/60 p-4 backdrop-blur lg:flex">
         <div className="px-2 py-2">
@@ -111,6 +112,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <StatPill icon="Bolt" tone="lime" value={`${me.xp} XP`} label="Total XP" />
                 <StatPill icon="Coin" tone="gold" value={me.coins} label="Coins" />
                 <span className="chip">Lv {me.level}</span>
+                <span className="chip">{me.nametag}</span>
                 {me.dailyLimit != null && (
                   <span className="chip" title="Free daily AI actions used">
                     {me.dailyUsed}/{me.dailyLimit} today
@@ -141,7 +143,7 @@ function UserCard({ me, loading, onLogout }: { me: ReturnType<typeof useUser>["m
         <Avatar keyName={me.avatar} size={38} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-ink">{me.name}</div>
-          <div className="truncate text-xs text-faint">{me.isPremium ? "Premium" : "Free plan"}</div>
+          <div className="truncate text-xs text-faint">{me.nametag} - {me.isPremium ? "Premium" : "Free plan"}</div>
         </div>
         <button onClick={onLogout} className="btn-ghost h-8 w-8 !px-0" title="Log out">
           <Icon.Logout className="h-[18px] w-[18px]" />

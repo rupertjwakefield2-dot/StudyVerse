@@ -13,6 +13,8 @@ const Body = z.object({
   topic: z.string().default("General"),
   difficulty: z.enum(["easy", "medium", "hard"]).default("medium"),
   quizId: z.string().optional(),
+  sessionId: z.string().optional(),
+  bonus: z.number().optional(),
   results: z.array(z.object({ correct: z.boolean(), topic: z.string().optional() })).min(1),
 });
 
@@ -22,6 +24,12 @@ export async function POST(req: Request) {
     const parsed = Body.safeParse(await req.json().catch(() => null));
     if (!parsed.success) return bad("Invalid attempt payload.");
     const input = parsed.data;
+
+    // Consume the one-use session token to block multi-tab farming.
+    if (input.sessionId) {
+      const valid = await store.consumeGameSession(user.id, input.sessionId);
+      if (!valid) return bad("Session token already used or expired. Play a new game.");
+    }
 
     const total = input.results.length;
     const score = input.results.filter((r) => r.correct).length;

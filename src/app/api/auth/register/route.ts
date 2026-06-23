@@ -22,7 +22,7 @@ export async function POST(req: Request) {
       name,
       email,
       passwordHash: await hashPassword(password),
-      avatar: "fox", // default cosmetic; shop grants ownership lazily
+      avatar: "spark", // default cosmetic; shop grants ownership lazily
     });
 
     await createSession(user.id);

@@ -11,12 +11,19 @@ export async function GET() {
 
     return ok({
       coins: u.coins,
-      equipped: u.avatar,
+      equipped: {
+        character: u.avatar,
+        background: u.background,
+        nametag: u.nametag,
+      },
       isPremium: u.isPremium,
       items: COSMETICS.map((c) => ({
         ...c,
         owned: c.price === 0 || ownedSet.has(c.id),
-        equipped: u.avatar === c.id,
+        equipped:
+          (c.type === "character" && u.avatar === c.id) ||
+          (c.type === "background" && u.background === c.id) ||
+          (c.type === "nametag" && u.nametag === c.id),
       })),
     });
   });

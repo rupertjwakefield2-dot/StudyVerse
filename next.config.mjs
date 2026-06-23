@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   // tesseract.js ships wasm + worker assets; let Next leave them external on the server.
-  serverExternalPackages: ["@anthropic-ai/sdk", "@libsql/client"],
+  serverExternalPackages: ["@anthropic-ai/sdk", "@libsql/client", "mammoth", "pdf-parse"],
   eslint: { ignoreDuringBuilds: true },
   async headers() {
     const securityHeaders = [

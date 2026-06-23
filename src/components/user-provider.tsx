@@ -7,6 +7,8 @@ export interface Me {
   name: string;
   email: string;
   avatar: string;
+  background: string;
+  nametag: string;
   isPremium: boolean;
   xp: number;
   level: number;
