@@ -5,7 +5,7 @@ services:
     name: synapse
     runtime: node
     plan: free                      # free tier: permanent *.onrender.com URL, sleeps when idle
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm run start
     healthCheckPath: /
     autoDeploy: true
