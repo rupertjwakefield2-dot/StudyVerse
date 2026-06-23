@@ -566,30 +566,36 @@ export const store = {
   },
 
   // ---------------- Behavior Points ----------------
-  async addBehaviorRecord(r: { teacherId: string; studentName: string; points: number; reason: string; customReason: string }): Promise<{ id: string; autoDetention: boolean }> {
+  async addBehaviorRecord(r: { teacherId: string; studentName: string; points: number; reason: string; customReason: string }): Promise<{ id: string; autoDetention: boolean; detentionsCreated: number }> {
     const db = await getBackend();
     const rid = id();
     await db.run(
       `INSERT INTO BehaviorRecord (id,teacherId,studentName,points,reason,customReason,createdAt) VALUES (?,?,?,?,?,?,?)`,
       [rid, r.teacherId, r.studentName, r.points, r.reason, r.customReason, now()]
     );
-    // Check if student has reached 5+ net behavior points → auto-create detention
+    // Every 5 net behavior points = one 30-min detention.
+    // Create as many as needed for each multiple of 5 newly crossed.
     const netPoints = await this.getStudentNetBehavior(r.teacherId, r.studentName);
-    let autoDetention = false;
-    if (netPoints >= 5 && (netPoints - r.points) < 5) {
-      // just crossed the threshold
+    const prevNet = Math.max(0, netPoints - r.points);
+    const detentionsBefore = Math.floor(prevNet / 5);
+    const detentionsNow = Math.floor(netPoints / 5);
+    const detentionsCreated = Math.max(0, detentionsNow - detentionsBefore);
+
+    if (detentionsCreated > 0) {
       const today = new Date().toISOString().slice(0, 10);
-      await this.createDetention({
-        teacherId: r.teacherId,
-        studentName: r.studentName,
-        reason: "Accumulated 5 behavior points",
-        date: today,
-        duration: 30,
-        notes: `Auto-created: student reached ${netPoints} net behavior points.`,
-      });
-      autoDetention = true;
+      for (let i = 0; i < detentionsCreated; i++) {
+        const milestone = (detentionsBefore + i + 1) * 5;
+        await this.createDetention({
+          teacherId: r.teacherId,
+          studentName: r.studentName,
+          reason: `Accumulated ${milestone} behaviour points`,
+          date: today,
+          duration: 30,
+          notes: `Auto-created: every 5 behaviour points triggers a 30-min detention (reached ${milestone}).`,
+        });
+      }
     }
-    return { id: rid, autoDetention };
+    return { id: rid, autoDetention: detentionsCreated > 0, detentionsCreated };
   },
   async getBehaviorRecords(teacherId: string): Promise<any[]> {
     const db = await getBackend();

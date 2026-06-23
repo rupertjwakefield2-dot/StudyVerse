@@ -7,14 +7,14 @@ import { useUser } from "@/components/user-provider";
 
 interface Student { id: string; name: string; classGroup: string; }
 
-// SIMS Next Gen-style attendance marks
+// SIMS-accurate attendance codes (DfE / SIMS Lesson Monitor register marks)
 const MARKS = [
-  { key: "present",    code: "/", label: "Present",          color: "lime" },
-  { key: "late",       code: "L", label: "Late",             color: "gold" },
-  { key: "absent",     code: "N", label: "Absent (unauth.)", color: "coral" },
-  { key: "authorised", code: "C", label: "Authorised",       color: "iris" },
-  { key: "illness",    code: "I", label: "Illness",          color: "iris" },
-  { key: "excluded",   code: "E", label: "Excluded",         color: "coral" },
+  { key: "present",    code: "/", label: "Present",            color: "lime" },
+  { key: "late",       code: "L", label: "Late (before close)", color: "gold" },
+  { key: "illness",    code: "I", label: "Illness",            color: "iris" },
+  { key: "authorised", code: "C", label: "Authorised (other)", color: "iris" },
+  { key: "absent",     code: "O", label: "Absent (unauth.)",   color: "coral" },
+  { key: "excluded",   code: "E", label: "Excluded",           color: "coral" },
 ] as const;
 
 const colorClass: Record<string, { on: string; text: string }> = {
@@ -23,6 +23,27 @@ const colorClass: Record<string, { on: string; text: string }> = {
   coral: { on: "bg-coral/20 border-coral/60 text-coral", text: "text-coral" },
   iris:  { on: "bg-iris/20 border-iris/60 text-iris",  text: "text-iris" },
 };
+
+// SIMS-style pupil avatar colours, derived from the name so they stay stable
+const AVATAR_COLORS = ["bg-iris/20 text-iris", "bg-lime/20 text-lime", "bg-gold/20 text-gold", "bg-coral/20 text-coral"];
+function avatarColor(name: string) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+// SIMS lists pupils "Surname, Forename"
+function simsName(name: string) {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length < 2) return name;
+  const surname = parts[parts.length - 1];
+  const forenames = parts.slice(0, -1).join(" ");
+  return `${surname}, ${forenames}`;
+}
 
 export default function RegisterPage() {
   const { me } = useUser();
@@ -119,10 +140,19 @@ export default function RegisterPage() {
     await loadRoster(classGroup);
   }
 
-  // Live attendance summary
-  const present = roster.filter((s) => (marks[s.name] || "present") === "present").length;
+  // SIMS-style attendance statistics
+  const possible = roster.length;
+  const presentCount = roster.filter((s) => (marks[s.name] || "present") === "present").length;
   const late = roster.filter((s) => marks[s.name] === "late").length;
-  const absent = roster.filter((s) => ["absent", "authorised", "illness", "excluded"].includes(marks[s.name])).length;
+  const authAbsent = roster.filter((s) => ["authorised", "illness"].includes(marks[s.name])).length;
+  const unauthAbsent = roster.filter((s) => marks[s.name] === "absent").length;
+  const excluded = roster.filter((s) => marks[s.name] === "excluded").length;
+  // For attendance %, present + late count as "in attendance"
+  const attending = presentCount + late;
+  const attendancePct = possible ? Math.round((attending / possible) * 100) : 0;
+  // Registration is "complete" once every pupil has an explicit mark
+  const registered = roster.filter((s) => marks[s.name] != null).length;
+  const registerComplete = possible > 0 && registered === possible;
 
   if (!isTeacher) {
     return (
@@ -144,9 +174,24 @@ export default function RegisterPage() {
         </button>
       </div>
 
-      <div>
-        <h1 className="font-display text-2xl font-bold text-ink">Attendance Register</h1>
-        <p className="mt-1 text-sm text-muted">Take the register SIMS-style — tap a mark for each student, then save.</p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl font-bold text-ink">Attendance Register</h1>
+          <p className="mt-1 text-sm text-muted">Take the register SIMS-style — tap a mark for each pupil, then save.</p>
+        </div>
+        {roster.length > 0 && (
+          <div className="flex items-center gap-2">
+            {registerComplete ? (
+              <span className="chip border-lime/50 bg-lime/10 text-lime font-semibold">
+                <Icon.Check className="h-4 w-4" /> Registration complete
+              </span>
+            ) : (
+              <span className="chip border-gold/40 text-gold font-medium">
+                {registered}/{possible} registered
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Controls */}
@@ -179,13 +224,10 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      {/* Summary bar */}
+      {/* SIMS-style registration progress */}
       {roster.length > 0 && (
-        <div className="flex flex-wrap gap-2 text-sm">
-          <span className="chip border-lime/40 text-lime">{present} present</span>
-          <span className="chip border-gold/40 text-gold">{late} late</span>
-          <span className="chip border-coral/40 text-coral">{absent} absent</span>
-          <span className="chip">{roster.length} total</span>
+        <div className="h-2 overflow-hidden rounded-full bg-surface-2">
+          <div className={`h-full rounded-full transition-all ${registerComplete ? "bg-lime" : "bg-gold"}`} style={{ width: `${(registered / possible) * 100}%` }} />
         </div>
       )}
 
@@ -193,29 +235,34 @@ export default function RegisterPage() {
       {roster.length === 0 ? (
         <div className="card p-10 text-center">
           <div className="text-3xl mb-3">📋</div>
-          <p className="text-muted text-sm">No students in <strong className="text-ink">{classGroup}</strong> yet.</p>
+          <p className="text-muted text-sm">No pupils in <strong className="text-ink">{classGroup}</strong> yet.</p>
           <button onClick={() => setShowAdd(true)} className="btn-primary mt-4">
-            <Icon.Users className="h-4 w-4" /> Add students
+            <Icon.Users className="h-4 w-4" /> Add pupils
           </button>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="overflow-hidden rounded-2xl border border-border bg-surface">
           {roster.map((s, i) => {
             const current = marks[s.name] || "present";
+            const isRegistered = marks[s.name] != null;
             return (
-              <div key={s.id} className="card flex items-center gap-3 p-3">
-                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-sm font-bold text-muted">
-                  {i + 1}
+              <div key={s.id} className={`flex items-center gap-3 px-3 py-2.5 border-b border-border last:border-0 ${i % 2 ? "bg-surface-2/40" : ""}`}>
+                <div className="w-6 shrink-0 text-center text-xs font-semibold text-faint">{i + 1}</div>
+                <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-bold ${avatarColor(s.name)}`}>
+                  {initials(s.name)}
                 </div>
-                <div className="min-w-0 flex-1 font-medium text-ink truncate">{s.name}</div>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-ink truncate">{simsName(s.name)}</div>
+                  <div className="text-[11px] text-faint">{isRegistered ? "Registered" : "Not yet registered"}</div>
+                </div>
+                <div className="flex flex-wrap gap-1">
                   {MARKS.map((mk) => {
-                    const active = current === mk.key;
+                    const active = current === mk.key && isRegistered;
                     const cc = colorClass[mk.color];
                     return (
                       <button key={mk.key} onClick={() => setMark(s.name, mk.key)} title={mk.label}
-                        className={`grid h-9 w-9 place-items-center rounded-lg border text-sm font-bold transition ${
-                          active ? cc.on : "border-border bg-surface-2 text-faint hover:border-muted"
+                        className={`grid h-8 w-8 place-items-center rounded-md border text-sm font-bold transition ${
+                          active ? cc.on : "border-border bg-surface text-faint hover:border-muted"
                         }`}>
                         {mk.code}
                       </button>
@@ -228,6 +275,26 @@ export default function RegisterPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* SIMS statistics footer */}
+      {roster.length > 0 && (
+        <div className="card p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="font-display text-sm font-semibold text-ink">Session statistics</h3>
+            <span className={`text-sm font-bold ${attendancePct >= 95 ? "text-lime" : attendancePct >= 90 ? "text-gold" : "text-coral"}`}>
+              {attendancePct}% attendance
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+            <Stat label="Possible" value={possible} tone="ink" />
+            <Stat label="Present" value={presentCount} tone="lime" />
+            <Stat label="Late" value={late} tone="gold" />
+            <Stat label="Auth. abs." value={authAbsent} tone="iris" />
+            <Stat label="Unauth. abs." value={unauthAbsent} tone="coral" />
+            <Stat label="Excluded" value={excluded} tone="coral" />
+          </div>
         </div>
       )}
 
@@ -278,6 +345,16 @@ export default function RegisterPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function Stat({ label, value, tone }: { label: string; value: number; tone: "ink" | "lime" | "gold" | "iris" | "coral" }) {
+  const tc = tone === "lime" ? "text-lime" : tone === "gold" ? "text-gold" : tone === "iris" ? "text-iris" : tone === "coral" ? "text-coral" : "text-ink";
+  return (
+    <div className="rounded-xl border border-border bg-surface-2 px-3 py-2 text-center">
+      <div className={`font-display text-xl font-bold ${tc}`}>{value}</div>
+      <div className="text-[11px] text-muted mt-0.5">{label}</div>
     </div>
   );
 }

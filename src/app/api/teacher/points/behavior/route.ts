@@ -33,7 +33,7 @@ export async function POST(req: Request) {
       reason: d.reason,
       customReason: d.customReason.trim(),
     });
-    return ok({ id: result.id, autoDetention: result.autoDetention });
+    return ok({ id: result.id, autoDetention: result.autoDetention, detentionsCreated: result.detentionsCreated });
   });
 }
 

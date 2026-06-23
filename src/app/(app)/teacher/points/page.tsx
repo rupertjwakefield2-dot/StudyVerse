@@ -99,8 +99,8 @@ export default function PointsPage() {
     const data = await res.json();
     setLoading(false);
     if (!res.ok) { setError(data.error || "Failed."); return; }
-    setSuccess(data.autoDetention
-      ? `⚠️ ${bStudent} has reached 5+ behavior points — a 30-min detention was automatically created.`
+    setSuccess(data.detentionsCreated > 0
+      ? `⚠️ ${bStudent} crossed a 5-point threshold — ${data.detentionsCreated} × 30-min detention${data.detentionsCreated > 1 ? "s were" : " was"} automatically created.`
       : `Added ${bPoints} behavior point${bPoints > 1 ? "s" : ""} for ${bStudent}.`
     );
     setBStudent(""); setBPoints(1); setBCustom("");
@@ -156,7 +156,7 @@ export default function PointsPage() {
         <div>
           <h1 className="font-display text-2xl font-bold text-ink">Points System</h1>
           <p className="mt-1 text-sm text-muted">
-            Track behavior and achievement points. 5 net behavior points auto-creates a 30-min detention.
+            Track behavior and achievement points. Every 5 net behavior points auto-creates a 30-min detention.
             Every 10 achievement points cancels 1 behavior point.
           </p>
         </div>
@@ -181,7 +181,7 @@ export default function PointsPage() {
         <div className="space-y-4">
           {/* Legend */}
           <div className="flex flex-wrap gap-3 text-xs">
-            <span className="chip border-coral/40 text-coral">🔴 Net behavior ≥ 5 → auto-detention</span>
+            <span className="chip border-coral/40 text-coral">🔴 Every 5 net behavior pts → a 30-min detention</span>
             <span className="chip border-gold/40 text-gold">🟡 Net behavior 3–4 → warning</span>
             <span className="chip border-lime/40 text-lime">🟢 Net behavior &lt; 3 → all good</span>
             <span className="chip border-iris/40 text-iris">⭐ Every 10 achievement pts cancels 1 behavior pt</span>
@@ -199,14 +199,19 @@ export default function PointsPage() {
                     <th className="px-4 py-3 text-center font-semibold text-lime">Achievement Pts</th>
                     <th className="px-4 py-3 text-center font-semibold text-iris">Cancelled</th>
                     <th className="px-4 py-3 text-center font-semibold text-ink">Net Behavior</th>
+                    <th className="px-4 py-3 text-center font-semibold text-coral">Detentions</th>
                     <th className="px-4 py-3 text-center font-semibold text-ink">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {summary.map((s) => {
                     const cancelled = Math.floor(s.achievementTotal / 10);
-                    const statusColor = s.needsDetention ? "text-coral" : s.netBehavior >= 3 ? "text-gold" : "text-lime";
-                    const statusText = s.needsDetention ? "⚠️ Detention" : s.netBehavior >= 3 ? "⚡ Warning" : "✓ Good";
+                    const detentionsEarned = Math.floor(s.netBehavior / 5);
+                    const toNext = 5 - (s.netBehavior % 5);
+                    const statusColor = s.needsDetention ? "text-coral" : s.netBehavior % 5 >= 3 ? "text-gold" : "text-lime";
+                    const statusText = s.needsDetention
+                      ? `⚠️ ${detentionsEarned} detention${detentionsEarned > 1 ? "s" : ""}`
+                      : s.netBehavior % 5 >= 3 ? `⚡ ${toNext} from detention` : "✓ Good";
                     return (
                       <tr key={s.studentName} className={s.needsDetention ? "bg-coral/5" : ""}>
                         <td className="px-4 py-3 font-medium text-ink">{s.studentName}</td>
@@ -218,6 +223,11 @@ export default function PointsPage() {
                         </td>
                         <td className="px-4 py-3 text-center text-faint">−{cancelled}</td>
                         <td className="px-4 py-3 text-center font-bold text-ink">{s.netBehavior}</td>
+                        <td className="px-4 py-3 text-center">
+                          {detentionsEarned > 0
+                            ? <span className="chip border-coral/40 text-coral font-bold">{detentionsEarned}×</span>
+                            : <span className="text-faint">—</span>}
+                        </td>
                         <td className={`px-4 py-3 text-center font-semibold ${statusColor}`}>{statusText}</td>
                       </tr>
                     );
@@ -279,7 +289,7 @@ export default function PointsPage() {
               </button>
             </form>
             <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-xs text-amber-400">
-              ⚠️ At 5 net behavior points, a 30-min detention is auto-created in the Detention Log.
+              ⚠️ Every 5 net behaviour points triggers a 30-min detention (at 5, 10, 15…) in the Detention Log.
             </div>
           </div>
 
