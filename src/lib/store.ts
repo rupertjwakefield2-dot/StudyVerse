@@ -167,9 +167,34 @@ async function migrate(db: Backend) {
   );
   CREATE INDEX IF NOT EXISTS idx_gamesession_user ON GameSession(userId, mode, usedAt);
   `);
+  await db.execScript(`
+  CREATE TABLE IF NOT EXISTS HomeworkTask (
+    id TEXT PRIMARY KEY,
+    teacherId TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    subject TEXT NOT NULL DEFAULT 'General',
+    dueDate TEXT,
+    classGroup TEXT NOT NULL DEFAULT '',
+    createdAt TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS Detention (
+    id TEXT PRIMARY KEY,
+    teacherId TEXT NOT NULL,
+    studentName TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    date TEXT NOT NULL,
+    duration INTEGER NOT NULL DEFAULT 30,
+    notes TEXT NOT NULL DEFAULT '',
+    createdAt TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_homework_teacher ON HomeworkTask(teacherId, createdAt);
+  CREATE INDEX IF NOT EXISTS idx_detention_teacher ON Detention(teacherId, date);
+  `);
   await addColumnIfMissing(db, "User", "background", "TEXT NOT NULL DEFAULT 'midnight-grid'");
   await addColumnIfMissing(db, "User", "nametag", "TEXT NOT NULL DEFAULT 'rookie'");
   await addColumnIfMissing(db, "User", "stripeCustomerId", "TEXT");
+  await addColumnIfMissing(db, "User", "role", "TEXT NOT NULL DEFAULT 'student'");
 }
 
 async function addColumnIfMissing(db: Backend, table: string, column: string, definition: string) {
@@ -459,5 +484,43 @@ export const store = {
     const db = await getBackend();
     const r = await db.get("SELECT * FROM User WHERE stripeCustomerId=?", [customerId]);
     return r ? mapUser(r) : null;
+  },
+
+  // ---------------- Homework tasks ----------------
+  async createHomework(t: { teacherId: string; title: string; description: string; subject: string; dueDate?: string; classGroup: string }): Promise<string> {
+    const db = await getBackend();
+    const hid = id();
+    await db.run(
+      `INSERT INTO HomeworkTask (id,teacherId,title,description,subject,dueDate,classGroup,createdAt) VALUES (?,?,?,?,?,?,?,?)`,
+      [hid, t.teacherId, t.title, t.description, t.subject, t.dueDate ?? null, t.classGroup, now()]
+    );
+    return hid;
+  },
+  async getHomework(teacherId: string): Promise<any[]> {
+    const db = await getBackend();
+    return db.all("SELECT * FROM HomeworkTask WHERE teacherId=? ORDER BY createdAt DESC", [teacherId]);
+  },
+  async deleteHomework(id: string, teacherId: string) {
+    const db = await getBackend();
+    await db.run("DELETE FROM HomeworkTask WHERE id=? AND teacherId=?", [id, teacherId]);
+  },
+
+  // ---------------- Detentions ----------------
+  async createDetention(d: { teacherId: string; studentName: string; reason: string; date: string; duration: number; notes: string }): Promise<string> {
+    const db = await getBackend();
+    const did = id();
+    await db.run(
+      `INSERT INTO Detention (id,teacherId,studentName,reason,date,duration,notes,createdAt) VALUES (?,?,?,?,?,?,?,?)`,
+      [did, d.teacherId, d.studentName, d.reason, d.date, d.duration, d.notes, now()]
+    );
+    return did;
+  },
+  async getDetentions(teacherId: string): Promise<any[]> {
+    const db = await getBackend();
+    return db.all("SELECT * FROM Detention WHERE teacherId=? ORDER BY date DESC", [teacherId]);
+  },
+  async deleteDetention(id: string, teacherId: string) {
+    const db = await getBackend();
+    await db.run("DELETE FROM Detention WHERE id=? AND teacherId=?", [id, teacherId]);
   },
 };

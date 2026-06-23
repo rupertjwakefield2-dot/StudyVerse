@@ -6,10 +6,18 @@ const FREE_MODES = [
   {
     name: "Classic Trivia",
     tag: "Free",
-    body: "Speed + accuracy leaderboard sprint. Fastest correct answers climb the board.",
+    body: "10 questions, 20 seconds each. Build a streak, earn a letter grade. The cleanest quiz game.",
     tone: "iris",
-    href: "/games/host",
+    href: "/games/classic",
     emoji: "🏆",
+  },
+  {
+    name: "Live Multiplayer",
+    tag: "Free",
+    body: "Host a live room with a join code. Race friends on the leaderboard in real time.",
+    tone: "lime",
+    href: "/games/host",
+    emoji: "📡",
   },
   {
     name: "Tower Defense",

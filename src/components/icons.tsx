@@ -91,4 +91,10 @@ export const Icon = {
   Arrow: (p: P) => (
     <svg {...base(p)}><path d="M5 12h14M13 6l6 6-6 6" /></svg>
   ),
+  Copy: (p: P) => (
+    <svg {...base(p)}><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+  ),
+  Users: (p: P) => (
+    <svg {...base(p)}><circle cx="8" cy="8" r="4" /><path d="M2 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.1A4 4 0 1 1 18 11M22 20c0-3.3-2-5.5-5-6" /></svg>
+  ),
 };

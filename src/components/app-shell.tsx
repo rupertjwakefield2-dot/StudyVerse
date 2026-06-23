@@ -12,10 +12,12 @@ import { useTheme } from "./theme-provider";
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: "Home" as const },
   { href: "/tutor", label: "AI Tutor", icon: "Spark" as const },
+  { href: "/humanizer", label: "Humanizer", icon: "Brain" as const },
   { href: "/revision", label: "Revision", icon: "Cards" as const },
   { href: "/games", label: "Games", icon: "Game" as const },
   { href: "/library", label: "Library", icon: "Library" as const },
   { href: "/shop", label: "Shop", icon: "Coin" as const },
+  { href: "/teacher", label: "Teacher Hub", icon: "Users" as const },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
