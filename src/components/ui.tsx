@@ -2,17 +2,17 @@
 
 import { Icon } from "./icons";
 import { COSMETIC_MAP } from "@/lib/cosmetics";
+import { CharacterSVG } from "./character-avatars";
 
 export function Avatar({ keyName, size = 40 }: { keyName: string; size?: number }) {
   const a = COSMETIC_MAP.get(keyName) ?? COSMETIC_MAP.get("spark")!;
-  const initials = a.preview.slice(0, 2).toUpperCase();
   return (
     <span
-      className="grid place-items-center rounded-full border border-border bg-surface-2 font-display font-bold text-iris"
-      style={{ width: size, height: size, fontSize: size * 0.32 }}
+      className="grid place-items-center rounded-full border border-border bg-surface-2 overflow-hidden"
+      style={{ width: size, height: size }}
       title={a.name}
     >
-      {initials}
+      <CharacterSVG id={a.type === "character" ? a.id : "spark"} size={size} />
     </span>
   );
 }

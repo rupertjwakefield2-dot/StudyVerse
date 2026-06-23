@@ -110,9 +110,9 @@ export default function PremiumPage() {
         <span className="chip mx-auto border-gold/40 bg-gold/10 text-gold">
           <Icon.Crown className="h-4 w-4" /> One-time payment · yours forever
         </span>
-        <h1 className="mt-4 font-display text-3xl font-bold text-ink">Unlock Synapse Premium</h1>
+        <h1 className="mt-4 font-display text-3xl font-bold text-ink">Unlock StudyVerse Premium</h1>
         <p className="mx-auto mt-2 max-w-lg text-muted">
-          A single <span className="font-semibold text-ink">$10</span> payment — no subscription — unlocks the full experience permanently.
+          A single <span className="font-semibold text-ink">$10</span> payment — no subscription, no renewal — unlocks the full experience permanently.
         </p>
       </div>
 
@@ -135,15 +135,37 @@ export default function PremiumPage() {
         <div className="mt-6 rounded-xl border border-coral/40 bg-coral/10 px-3 py-2 text-center text-sm text-coral">{error}</div>
       )}
 
-      <div className="card mt-6 flex flex-col items-center gap-3 border-gold/40 p-6 text-center">
-        <div className="font-display text-4xl font-bold text-ink">$10<span className="text-base font-normal text-faint"> once</span></div>
-        <button onClick={upgrade} disabled={loading} className="btn-primary w-full max-w-xs bg-gold py-3 text-black">
-          {loading ? "Redirecting to checkout…" : "Upgrade to Premium"}
-          {!loading && <Icon.Crown className="h-4 w-4" />}
-        </button>
-        {!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY && (
-          <p className="text-xs text-faint">No Stripe keys configured — clicking upgrades instantly (dev mode).</p>
-        )}
+      <div className="card mt-6 border-gold/40 p-6">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <div className="font-display text-4xl font-bold text-ink">$10<span className="text-base font-normal text-faint"> one-time</span></div>
+            <ul className="mt-2 space-y-1 text-sm text-muted">
+              <li className="flex items-center gap-1.5"><Icon.Check className="h-3.5 w-3.5 text-gold" /> No subscription, no renewal</li>
+              <li className="flex items-center gap-1.5"><Icon.Check className="h-3.5 w-3.5 text-gold" /> Instant access on purchase</li>
+              <li className="flex items-center gap-1.5"><Icon.Check className="h-3.5 w-3.5 text-gold" /> Secure checkout via Stripe</li>
+            </ul>
+          </div>
+          <div className="flex flex-col items-center gap-2 w-full sm:w-auto">
+            <button onClick={upgrade} disabled={loading}
+              className="btn-primary w-full sm:w-52 bg-gold py-3 text-base font-bold text-black disabled:opacity-60">
+              {loading ? (
+                <span className="flex items-center gap-2 justify-center">
+                  <span className="h-4 w-4 rounded-full border-2 border-black/30 border-t-black animate-spin" />
+                  Redirecting…
+                </span>
+              ) : (
+                <span className="flex items-center gap-2 justify-center">
+                  <Icon.Crown className="h-5 w-5" /> Upgrade to Premium
+                </span>
+              )}
+            </button>
+            <p className="text-xs text-faint text-center">
+              {process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+                ? "You'll be redirected to Stripe's secure checkout."
+                : "Dev mode — no Stripe keys, upgrades instantly."}
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );

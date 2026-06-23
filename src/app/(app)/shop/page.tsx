@@ -4,8 +4,15 @@ import { useState, useEffect } from "react";
 import { Icon } from "@/components/icons";
 import { useUser } from "@/components/user-provider";
 import { COSMETICS, type CosmeticDef } from "@/lib/cosmetics";
+import { CharacterSVG, BackgroundSwatch, NametagBadge } from "@/components/character-avatars";
 
 type Tab = "packs" | "characters" | "backgrounds" | "nametags";
+
+function CosmeticPreview({ c, size = 56 }: { c: CosmeticDef; size?: number }) {
+  if (c.type === "character") return <CharacterSVG id={c.id} size={size} />;
+  if (c.type === "background") return <BackgroundSwatch id={c.id} size={size} />;
+  return <NametagBadge id={c.id} name={c.name} size={size} />;
+}
 
 const PACKS = [
   { key: "common", name: "Common Pack", cost: 100, emoji: "📦", desc: "Guaranteed Common or Rare item.", color: "border-border", badge: "Common / Rare" },
@@ -76,6 +83,7 @@ export default function ShopPage() {
 
   const byType = (type: string) => COSMETICS.filter((c) => c.type === type);
 
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -105,7 +113,9 @@ export default function ShopPage() {
       {/* Gacha Pull Result */}
       {pullResult && (
         <div className="card border-gold/40 p-6 text-center animate-fade-up">
-          <div className="text-5xl mb-2">🎉</div>
+          <div className="flex justify-center mb-3">
+            <CosmeticPreview c={pullResult.pulled} size={80} />
+          </div>
           <h2 className="font-display text-xl font-bold text-ink">You pulled:</h2>
           <div className={`inline-flex items-center gap-2 mt-2 rounded-full border px-4 py-1.5 text-sm font-semibold ${RARITY_COLORS[pullResult.pulled.rarity]}`}>
             {pullResult.pulled.name} <span className="text-xs capitalize opacity-70">{pullResult.pulled.rarity}</span>
@@ -155,8 +165,8 @@ export default function ShopPage() {
               <div key={c.id} className={`card p-4 flex flex-col gap-3 ${equipped ? "border-iris/40" : ""}`}>
                 {/* Preview */}
                 <div className="flex items-center justify-between gap-2">
-                  <div className="grid h-12 w-12 place-items-center rounded-xl bg-surface-2 font-display font-bold text-sm text-ink">
-                    {c.preview}
+                  <div className="grid h-14 w-14 place-items-center rounded-xl bg-surface-2 overflow-hidden">
+                    <CosmeticPreview c={c} size={56} />
                   </div>
                   <div className={`chip text-xs capitalize ${RARITY_COLORS[c.rarity]}`}>{c.rarity}</div>
                 </div>
