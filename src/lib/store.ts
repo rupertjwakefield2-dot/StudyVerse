@@ -206,10 +206,31 @@ async function migrate(db: Backend) {
     customReason TEXT NOT NULL DEFAULT '',
     createdAt TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS ClassStudent (
+    id TEXT PRIMARY KEY,
+    teacherId TEXT NOT NULL,
+    name TEXT NOT NULL,
+    classGroup TEXT NOT NULL DEFAULT 'My Class',
+    createdAt TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS Attendance (
+    id TEXT PRIMARY KEY,
+    teacherId TEXT NOT NULL,
+    studentName TEXT NOT NULL,
+    classGroup TEXT NOT NULL DEFAULT 'My Class',
+    date TEXT NOT NULL,
+    session TEXT NOT NULL DEFAULT 'AM',
+    mark TEXT NOT NULL DEFAULT 'present',
+    note TEXT NOT NULL DEFAULT '',
+    createdAt TEXT NOT NULL,
+    UNIQUE(teacherId, studentName, classGroup, date, session)
+  );
   CREATE INDEX IF NOT EXISTS idx_homework_teacher ON HomeworkTask(teacherId, createdAt);
   CREATE INDEX IF NOT EXISTS idx_detention_teacher ON Detention(teacherId, date);
   CREATE INDEX IF NOT EXISTS idx_behavior_teacher ON BehaviorRecord(teacherId, studentName, createdAt);
   CREATE INDEX IF NOT EXISTS idx_achievement_teacher ON AchievementRecord(teacherId, studentName, createdAt);
+  CREATE INDEX IF NOT EXISTS idx_roster_teacher ON ClassStudent(teacherId, classGroup);
+  CREATE INDEX IF NOT EXISTS idx_attendance_teacher ON Attendance(teacherId, classGroup, date);
   `);
   await addColumnIfMissing(db, "User", "background", "TEXT NOT NULL DEFAULT 'midnight-grid'");
   await addColumnIfMissing(db, "User", "nametag", "TEXT NOT NULL DEFAULT 'rookie'");
@@ -596,6 +617,130 @@ export const store = {
   async deleteAchievementRecord(rid: string, teacherId: string) {
     const db = await getBackend();
     await db.run("DELETE FROM AchievementRecord WHERE id=? AND teacherId=?", [rid, teacherId]);
+  },
+
+  // ---------------- Class roster (register) ----------------
+  async addStudent(s: { teacherId: string; name: string; classGroup: string }): Promise<string> {
+    const db = await getBackend();
+    const sid = id();
+    await db.run(
+      `INSERT INTO ClassStudent (id,teacherId,name,classGroup,createdAt) VALUES (?,?,?,?,?)`,
+      [sid, s.teacherId, s.name, s.classGroup, now()]
+    );
+    return sid;
+  },
+  async getRoster(teacherId: string, classGroup?: string): Promise<any[]> {
+    const db = await getBackend();
+    if (classGroup) {
+      return db.all("SELECT * FROM ClassStudent WHERE teacherId=? AND classGroup=? ORDER BY name", [teacherId, classGroup]);
+    }
+    return db.all("SELECT * FROM ClassStudent WHERE teacherId=? ORDER BY classGroup, name", [teacherId]);
+  },
+  async getClassGroups(teacherId: string): Promise<string[]> {
+    const db = await getBackend();
+    const rows = await db.all("SELECT DISTINCT classGroup FROM ClassStudent WHERE teacherId=? ORDER BY classGroup", [teacherId]);
+    return rows.map((r: any) => r.classGroup);
+  },
+  async deleteStudent(sid: string, teacherId: string) {
+    const db = await getBackend();
+    await db.run("DELETE FROM ClassStudent WHERE id=? AND teacherId=?", [sid, teacherId]);
+  },
+
+  // ---------------- Attendance (register) ----------------
+  async saveAttendance(
+    teacherId: string,
+    classGroup: string,
+    date: string,
+    session: string,
+    marks: Array<{ studentName: string; mark: string; note?: string }>
+  ): Promise<void> {
+    const db = await getBackend();
+    for (const m of marks) {
+      const existing = await db.get(
+        "SELECT id FROM Attendance WHERE teacherId=? AND studentName=? AND classGroup=? AND date=? AND session=?",
+        [teacherId, m.studentName, classGroup, date, session]
+      );
+      if (existing) {
+        await db.run("UPDATE Attendance SET mark=?, note=? WHERE id=?", [m.mark, m.note ?? "", existing.id]);
+      } else {
+        await db.run(
+          `INSERT INTO Attendance (id,teacherId,studentName,classGroup,date,session,mark,note,createdAt) VALUES (?,?,?,?,?,?,?,?,?)`,
+          [id(), teacherId, m.studentName, classGroup, date, session, m.mark, m.note ?? "", now()]
+        );
+      }
+    }
+  },
+  async getAttendance(teacherId: string, classGroup: string, date: string, session: string): Promise<any[]> {
+    const db = await getBackend();
+    return db.all(
+      "SELECT * FROM Attendance WHERE teacherId=? AND classGroup=? AND date=? AND session=?",
+      [teacherId, classGroup, date, session]
+    );
+  },
+  async getAttendanceHistory(teacherId: string, classGroup: string, limitDays = 30): Promise<any[]> {
+    const db = await getBackend();
+    return db.all(
+      "SELECT * FROM Attendance WHERE teacherId=? AND classGroup=? ORDER BY date DESC LIMIT ?",
+      [teacherId, classGroup, limitDays * 40]
+    );
+  },
+
+  // ---------------- Activity logger (Satchel-style unified feed) ----------------
+  async getActivityFeed(teacherId: string, limit = 100): Promise<Array<{
+    id: string; type: string; studentName: string; title: string; detail: string; meta: string; createdAt: string;
+  }>> {
+    const [homework, detentions, behavior, achievement, attendance] = await Promise.all([
+      this.getHomework(teacherId),
+      this.getDetentions(teacherId),
+      this.getBehaviorRecords(teacherId),
+      this.getAchievementRecords(teacherId),
+      (async () => {
+        const db = await getBackend();
+        return db.all("SELECT * FROM Attendance WHERE teacherId=? ORDER BY createdAt DESC LIMIT 50", [teacherId]);
+      })(),
+    ]);
+
+    const feed: Array<{ id: string; type: string; studentName: string; title: string; detail: string; meta: string; createdAt: string }> = [];
+
+    for (const h of homework) {
+      feed.push({
+        id: h.id, type: "homework", studentName: h.classGroup || "Class",
+        title: h.title, detail: h.description || "", meta: `${h.subject}${h.dueDate ? ` · due ${h.dueDate}` : ""}`,
+        createdAt: h.createdAt,
+      });
+    }
+    for (const d of detentions) {
+      feed.push({
+        id: d.id, type: "detention", studentName: d.studentName,
+        title: d.reason, detail: d.notes || "", meta: `${d.date} · ${d.duration} min`,
+        createdAt: d.createdAt,
+      });
+    }
+    for (const b of behavior) {
+      feed.push({
+        id: b.id, type: "behavior", studentName: b.studentName,
+        title: b.reason === "Custom" ? b.customReason : b.reason, detail: "", meta: `−${b.points} behaviour pt${b.points > 1 ? "s" : ""}`,
+        createdAt: b.createdAt,
+      });
+    }
+    for (const a of achievement) {
+      feed.push({
+        id: a.id, type: "achievement", studentName: a.studentName,
+        title: a.reason === "Custom" ? a.customReason : a.reason, detail: "", meta: `+${a.points} achievement pt${a.points > 1 ? "s" : ""}`,
+        createdAt: a.createdAt,
+      });
+    }
+    for (const at of attendance) {
+      feed.push({
+        id: at.id, type: "attendance", studentName: at.studentName,
+        title: `Marked ${at.mark}`, detail: at.note || "", meta: `${at.date} · ${at.session} · ${at.classGroup}`,
+        createdAt: at.createdAt,
+      });
+    }
+
+    return feed
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+      .slice(0, limit);
   },
 
   // Returns net behavior points for a student: raw behavior - floor(achievement / 10)

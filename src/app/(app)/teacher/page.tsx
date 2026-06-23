@@ -78,6 +78,28 @@ export default function TeacherDashboard() {
           </span>
         </Link>
 
+        <Link href="/teacher/register" className={`card group p-5 transition hover:-translate-y-0.5 hover:border-iris/40 ${!isTeacher ? "opacity-50 pointer-events-none" : ""}`}>
+          <div className="grid h-11 w-11 place-items-center rounded-xl bg-iris/12 text-iris">
+            <Icon.Check className="h-5 w-5" />
+          </div>
+          <h3 className="mt-3 font-display font-semibold text-ink">Attendance Register</h3>
+          <p className="mt-1 text-sm text-muted">Take the register SIMS-style — present, late, absent in one tap.</p>
+          <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-iris">
+            Open <Icon.Arrow className="h-4 w-4 transition group-hover:translate-x-0.5" />
+          </span>
+        </Link>
+
+        <Link href="/teacher/logger" className={`card group p-5 transition hover:-translate-y-0.5 hover:border-coral/40 ${!isTeacher ? "opacity-50 pointer-events-none" : ""}`}>
+          <div className="grid h-11 w-11 place-items-center rounded-xl bg-coral/12 text-coral">
+            <Icon.Library className="h-5 w-5" />
+          </div>
+          <h3 className="mt-3 font-display font-semibold text-ink">Activity Logger</h3>
+          <p className="mt-1 text-sm text-muted">Satchel-style live feed of every homework, point, and register mark.</p>
+          <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-coral">
+            Open <Icon.Arrow className="h-4 w-4 transition group-hover:translate-x-0.5" />
+          </span>
+        </Link>
+
         <Link href="/humanizer" className="card group p-5 transition hover:-translate-y-0.5 hover:border-lime/40">
           <div className="grid h-11 w-11 place-items-center rounded-xl bg-lime/12 text-lime">
             <Icon.Spark className="h-5 w-5" />
