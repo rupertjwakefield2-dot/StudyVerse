@@ -20,6 +20,7 @@ export async function GET() {
         background: u.background,
         nametag: u.nametag,
         isPremium: u.isPremium,
+        role: (u as any).role ?? "student",
         xp: u.xp,
         level: u.level,
         coins: u.coins,

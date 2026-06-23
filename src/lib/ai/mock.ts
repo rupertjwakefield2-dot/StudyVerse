@@ -96,7 +96,13 @@ export class MockProvider implements AIProvider {
       title: `${topic} — practice quiz`,
       subject,
       topic,
-      questions: questions.slice(0, opts.count).map((q, i) => ({ id: `q${i + 1}`, ...q, difficulty: q.difficulty ?? opts.difficulty })),
+      questions: questions.slice(0, opts.count).map((q, i) => {
+        // Always randomise answer position — bank questions hardcode answerIndex:0.
+        const correct = q.choices[q.answerIndex];
+        const wrong = q.choices.filter((_, ci) => ci !== q.answerIndex);
+        const { list, answerIndex } = shuffleWithAnswer(correct, wrong, i);
+        return { id: `q${i + 1}`, ...q, choices: list, answerIndex, difficulty: q.difficulty ?? opts.difficulty };
+      }),
     };
   }
 
@@ -125,66 +131,143 @@ export class MockProvider implements AIProvider {
 // Humanizer (heuristic text rewriting for the humanizer feature)
 // ---------------------------------------------------------------------------
 export function humanizeText(text: string): string {
-  const replacements: [RegExp, string][] = [
-    [/\butilize\b/gi, "use"],
-    [/\bdemonstrate\b/gi, "show"],
-    [/\bfacilitate\b/gi, "help"],
-    [/\bsubsequently\b/gi, "then"],
-    [/\bfurthermore\b/gi, "also"],
-    [/\bhowever\b/gi, "but"],
-    [/\btherefore\b/gi, "so"],
-    [/\bnevertheless\b/gi, "still"],
-    [/\bin conclusion\b/gi, "to sum up"],
-    [/\bit is important to note that\b/gi, "worth noting"],
-    [/\bin order to\b/gi, "to"],
-    [/\bdue to the fact that\b/gi, "because"],
-    [/\ba significant\b/gi, "a key"],
-    [/\bcommence\b/gi, "start"],
-    [/\bterminate\b/gi, "end"],
-    [/\bpurchase\b/gi, "buy"],
-    [/\badditionally\b/gi, "plus"],
-    [/\bmoreover\b/gi, "what's more"],
-    [/\bconsequently\b/gi, "as a result"],
+  // Phase 1: Phrase-level replacements (most impactful — AI boilerplate)
+  const phrases: [RegExp, string][] = [
+    [/\bIn conclusion,?\b/gi, "To sum up,"],
+    [/\bIn summary,?\b/gi, "Overall,"],
+    [/\bIt is (important|worth|crucial|essential|vital) to note that\b/gi, "Worth noting:"],
+    [/\bIt is (important|crucial|essential|vital) to\b/gi, "You need to"],
     [/\bIt should be noted that\b/gi, "Note that"],
-    [/\bone can\b/gi, "you can"],
-    [/\bThis essay will\b/gi, "I'll"],
-    [/\bThis paper will\b/gi, "I'll"],
-    [/\bdo not\b/gi, "don't"],
-    [/\bcannot\b/gi, "can't"],
-    [/\bwill not\b/gi, "won't"],
-    [/\bdoes not\b/gi, "doesn't"],
-    [/\bis not\b/gi, "isn't"],
-    [/\bare not\b/gi, "aren't"],
-    [/\bwas not\b/gi, "wasn't"],
-    [/\bwould not\b/gi, "wouldn't"],
-    [/\bshould not\b/gi, "shouldn't"],
-    [/\bcould not\b/gi, "couldn't"],
-    [/\bhave not\b/gi, "haven't"],
-    [/\bhas not\b/gi, "hasn't"],
-    [/\bhad not\b/gi, "hadn't"],
+    [/\bIt (is|was) (important|crucial|essential) that\b/gi, "It really matters that"],
+    [/\bThis essay will (explore|examine|discuss|analyse|analyze)\b/gi, "I'll look at"],
+    [/\bThis paper will (explore|examine|discuss|analyse|analyze)\b/gi, "I'll look at"],
+    [/\bThis essay (explores|examines|discusses|analyses|analyzes)\b/gi, "This looks at"],
+    [/\bIn the (modern|contemporary|current) (world|era|age|society)\b/gi, "These days"],
+    [/\bThroughout (history|the ages|time)\b/gi, "Historically"],
+    [/\bFrom the (above|foregoing) (discussion|analysis|examination)\b/gi, "From this"],
+    [/\bAs (previously|already) (mentioned|stated|discussed|noted)\b/gi, "As I said"],
+    [/\bAs can be seen (from the above)?\b/gi, "Clearly,"],
+    [/\bDue to the fact that\b/gi, "Because"],
+    [/\bIn order to\b/gi, "To"],
+    [/\bIn the event that\b/gi, "If"],
+    [/\bAt this point in time\b/gi, "Right now"],
+    [/\bAt the present time\b/gi, "Currently"],
+    [/\bIn spite of the fact that\b/gi, "Even though"],
+    [/\bWith regard(s)? to\b/gi, "Regarding"],
+    [/\bWith respect to\b/gi, "About"],
+    [/\bIn terms of\b/gi, "When it comes to"],
+    [/\bFor the purpose(s)? of\b/gi, "To"],
+    [/\bIn the (case|event) of\b/gi, "When"],
+    [/\bPlays? a (crucial|critical|important|key|significant|vital|pivotal) role in\b/gi, "is key to"],
+    [/\b(A|An) (crucial|critical|important|key|significant|vital|pivotal) (aspect|component|element|factor|part)\b/gi, "A key part"],
+    [/\bHas (a profound|an immense|a significant|a major|a great) (impact|effect|influence) on\b/gi, "strongly affects"],
+    [/\bFirstly,\b/gi, "First,"],
+    [/\bSecondly,\b/gi, "Second,"],
+    [/\bThirdly,\b/gi, "Third,"],
+    [/\bLastly,\b/gi, "Finally,"],
+    [/\bFurthermore,?\b/gi, "Also,"],
+    [/\bMoreover,?\b/gi, "What's more,"],
+    [/\bNevertheless,?\b/gi, "Still,"],
+    [/\bNotwithstanding,?\b/gi, "Even so,"],
+    [/\bConsequently,?\b/gi, "As a result,"],
+    [/\bSubsequently,?\b/gi, "Then,"],
+    [/\bAdditionally,?\b/gi, "Plus,"],
+    [/\bHenceforth,?\b/gi, "From now on,"],
+    [/\bTherefore,?\b/gi, "So,"],
+    [/\bThus,?\b/gi, "So,"],
+    [/\bHence,?\b/gi, "So,"],
+    [/\bThis (clearly|evidently) (shows|demonstrates|illustrates|suggests|indicates)\b/gi, "This shows"],
+    [/\bThis (serves to|aims to|seeks to)\b/gi, "This"],
+  ];
+
+  // Phase 2: Word-level replacements (static — no inflection matching)
+  const words: [RegExp, string][] = [
+    [/\butilized\b/gi, "used"], [/\butilizes\b/gi, "uses"], [/\butilize\b/gi, "use"],
+    [/\bdemonstrated\b/gi, "showed"], [/\bdemonstrates\b/gi, "shows"], [/\bdemonstrate\b/gi, "show"],
+    [/\bfacilitated\b/gi, "helped"], [/\bfacilitates\b/gi, "helps"], [/\bfacilitate\b/gi, "help"],
+    [/\bcommenced\b/gi, "started"], [/\bcommences\b/gi, "starts"], [/\bcommence\b/gi, "start"],
+    [/\bterminated\b/gi, "ended"], [/\bterminates\b/gi, "ends"], [/\bterminate\b/gi, "end"],
+    [/\bpurchased\b/gi, "bought"], [/\bpurchases\b/gi, "buys"], [/\bpurchase\b/gi, "buy"],
+    [/\binitiated\b/gi, "started"], [/\binitiates\b/gi, "starts"], [/\binitiate\b/gi, "start"],
+    [/\bascertain\b/gi, "find out"], [/\bendeavour\b/gi, "try"], [/\bendeavor\b/gi, "try"],
+    [/\bimplementing\b/gi, "using"], [/\bimplemented\b/gi, "used"], [/\bimplementation\b/gi, "use"],
+    [/\bsubstantially\b/gi, "significantly"], [/\bsubstantial\b/gi, "large"],
+    [/\bnumerous\b/gi, "many"], [/\bsufficiently\b/gi, "enough"], [/\bsufficient\b/gi, "enough"],
+    [/\bprior to\b/gi, "before"], [/\bsubsequent to\b/gi, "after"], [/\bin lieu of\b/gi, "instead of"],
+    [/\bprohibited\b/gi, "banned"], [/\bprohibits\b/gi, "bans"], [/\bprohibit\b/gi, "ban"],
+    [/\brequired\b/gi, "needed"], [/\brequires\b/gi, "needs"], [/\brequire\b/gi, "need"],
+    [/\bobtained\b/gi, "got"], [/\bobtains\b/gi, "gets"], [/\bobtain\b/gi, "get"],
+    [/\bpossessed\b/gi, "had"], [/\bpossesses\b/gi, "has"], [/\bpossessing\b/gi, "having"], [/\bpossess\b/gi, "have"],
+    [/\bexamined\b/gi, "looked at"], [/\bexamines\b/gi, "looks at"], [/\bexamine\b/gi, "look at"],
+    [/\belaborate on\b/gi, "explain"],
+    [/\bin addition\b/gi, "also"],
+    [/\bexemplified\b/gi, "showed"], [/\bexemplifies\b/gi, "shows"], [/\bexemplify\b/gi, "show"],
+    [/\bpertaining to\b/gi, "relating to"], [/\bpertains to\b/gi, "relates to"],
+  ];
+
+  // Phase 3: Contraction expansion (AI always writes formal full forms)
+  const contractions: [RegExp, string][] = [
+    [/\bdo not\b/g, "don't"],
+    [/\bcannot\b/g, "can't"],
+    [/\bwill not\b/g, "won't"],
+    [/\bdoes not\b/g, "doesn't"],
+    [/\bis not\b/g, "isn't"],
+    [/\bare not\b/g, "aren't"],
+    [/\bwas not\b/g, "wasn't"],
+    [/\bwere not\b/g, "weren't"],
+    [/\bwould not\b/g, "wouldn't"],
+    [/\bshould not\b/g, "shouldn't"],
+    [/\bcould not\b/g, "couldn't"],
+    [/\bhave not\b/g, "haven't"],
+    [/\bhas not\b/g, "hasn't"],
+    [/\bhad not\b/g, "hadn't"],
+    [/\bI am\b/g, "I'm"],
+    [/\bI have\b/g, "I've"],
+    [/\bI will\b/g, "I'll"],
+    [/\bI would\b/g, "I'd"],
+    [/\bthey are\b/gi, "they're"],
+    [/\bthey have\b/gi, "they've"],
+    [/\bthey will\b/gi, "they'll"],
+    [/\bwe are\b/g, "we're"],
+    [/\bwe have\b/g, "we've"],
+    [/\bwe will\b/g, "we'll"],
+    [/\bit is\b/g, "it's"],
+    [/\bit has\b/g, "it's"],
+    [/\bthat is\b/g, "that's"],
+    [/\bthere is\b/g, "there's"],
+    [/\bthere are\b/g, "there are"], // keep — "there're" sounds wrong
   ];
 
   let result = text;
-  for (const [re, rep] of replacements) result = result.replace(re, rep);
+  for (const [re, rep] of phrases) result = result.replace(re, rep as string);
+  for (const [re, rep] of words) result = result.replace(re, rep as any);
+  for (const [re, rep] of contractions) result = result.replace(re, rep);
 
-  // Split very long sentences (>40 words) at conjunctions.
+  // Phase 4: Break overly long sentences at natural joints
   const sentences = result.split(/(?<=[.!?])\s+/);
   const out: string[] = [];
   for (const s of sentences) {
-    const words = s.split(/\s+/);
-    if (words.length > 38) {
-      const mid = s.search(/\b(and|but|so|yet|because|although|while|whereas)\b/gi);
-      if (mid > s.length * 0.3 && mid < s.length * 0.7) {
-        const pivot = s.slice(mid, mid + 20).search(/\b(and|but|so|yet|because|although|while|whereas)\b/gi);
-        const breakAt = mid + pivot;
-        const first = s.slice(0, breakAt).trimEnd();
-        const second = capitalize(s.slice(breakAt).trimStart());
-        out.push(first.endsWith(".") ? first : first + ".", second);
-        continue;
+    const words2 = s.trim().split(/\s+/);
+    if (words2.length > 35) {
+      // Try to split at a conjunction roughly in the middle third
+      const third = Math.floor(s.length / 3);
+      const twoThird = Math.floor((s.length * 2) / 3);
+      const mid = s.slice(third, twoThird).search(/\b(and|but|so|yet|because|although|while|whereas|which)\b/i);
+      if (mid >= 0) {
+        const breakAt = third + mid;
+        const conj = s.slice(breakAt).match(/^(and|but|so|yet|because|although|while|whereas|which)\b/i)?.[0] ?? "";
+        const first = s.slice(0, breakAt).trimEnd().replace(/,$/, "");
+        const rest = s.slice(breakAt + conj.length).trimStart();
+        if (first.length > 20 && rest.length > 20) {
+          out.push(first.endsWith(".") || first.endsWith("!") || first.endsWith("?") ? first : first + ".");
+          out.push(capitalize(rest));
+          continue;
+        }
       }
     }
     out.push(s);
   }
+
   return out.join(" ");
 }
 
