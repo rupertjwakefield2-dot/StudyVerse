@@ -44,7 +44,7 @@ export default function TeacherDashboard() {
       </div>
 
       {/* Teacher tools */}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Link href="/teacher/homework" className={`card group p-5 transition hover:-translate-y-0.5 hover:border-iris/40 ${!isTeacher ? "opacity-50 pointer-events-none" : ""}`}>
           <div className="grid h-11 w-11 place-items-center rounded-xl bg-iris/12 text-iris">
             <Icon.Cards className="h-5 w-5" />
@@ -63,6 +63,17 @@ export default function TeacherDashboard() {
           <h3 className="mt-3 font-display font-semibold text-ink">Detention Log</h3>
           <p className="mt-1 text-sm text-muted">Record and manage student detentions with reasons and dates.</p>
           <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-coral">
+            Open <Icon.Arrow className="h-4 w-4 transition group-hover:translate-x-0.5" />
+          </span>
+        </Link>
+
+        <Link href="/teacher/points" className={`card group p-5 transition hover:-translate-y-0.5 hover:border-gold/40 ${!isTeacher ? "opacity-50 pointer-events-none" : ""}`}>
+          <div className="grid h-11 w-11 place-items-center rounded-xl bg-gold/12 text-gold">
+            <Icon.Bolt className="h-5 w-5" />
+          </div>
+          <h3 className="mt-3 font-display font-semibold text-ink">Points System</h3>
+          <p className="mt-1 text-sm text-muted">Award behavior and achievement points. Auto-detentions at 5 pts.</p>
+          <span className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-gold">
             Open <Icon.Arrow className="h-4 w-4 transition group-hover:translate-x-0.5" />
           </span>
         </Link>

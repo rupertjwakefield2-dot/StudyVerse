@@ -188,8 +188,28 @@ async function migrate(db: Backend) {
     notes TEXT NOT NULL DEFAULT '',
     createdAt TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS BehaviorRecord (
+    id TEXT PRIMARY KEY,
+    teacherId TEXT NOT NULL,
+    studentName TEXT NOT NULL,
+    points INTEGER NOT NULL DEFAULT 1,
+    reason TEXT NOT NULL,
+    customReason TEXT NOT NULL DEFAULT '',
+    createdAt TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS AchievementRecord (
+    id TEXT PRIMARY KEY,
+    teacherId TEXT NOT NULL,
+    studentName TEXT NOT NULL,
+    points INTEGER NOT NULL DEFAULT 1,
+    reason TEXT NOT NULL,
+    customReason TEXT NOT NULL DEFAULT '',
+    createdAt TEXT NOT NULL
+  );
   CREATE INDEX IF NOT EXISTS idx_homework_teacher ON HomeworkTask(teacherId, createdAt);
   CREATE INDEX IF NOT EXISTS idx_detention_teacher ON Detention(teacherId, date);
+  CREATE INDEX IF NOT EXISTS idx_behavior_teacher ON BehaviorRecord(teacherId, studentName, createdAt);
+  CREATE INDEX IF NOT EXISTS idx_achievement_teacher ON AchievementRecord(teacherId, studentName, createdAt);
   `);
   await addColumnIfMissing(db, "User", "background", "TEXT NOT NULL DEFAULT 'midnight-grid'");
   await addColumnIfMissing(db, "User", "nametag", "TEXT NOT NULL DEFAULT 'rookie'");
@@ -522,5 +542,103 @@ export const store = {
   async deleteDetention(id: string, teacherId: string) {
     const db = await getBackend();
     await db.run("DELETE FROM Detention WHERE id=? AND teacherId=?", [id, teacherId]);
+  },
+
+  // ---------------- Behavior Points ----------------
+  async addBehaviorRecord(r: { teacherId: string; studentName: string; points: number; reason: string; customReason: string }): Promise<{ id: string; autoDetention: boolean }> {
+    const db = await getBackend();
+    const rid = id();
+    await db.run(
+      `INSERT INTO BehaviorRecord (id,teacherId,studentName,points,reason,customReason,createdAt) VALUES (?,?,?,?,?,?,?)`,
+      [rid, r.teacherId, r.studentName, r.points, r.reason, r.customReason, now()]
+    );
+    // Check if student has reached 5+ net behavior points → auto-create detention
+    const netPoints = await this.getStudentNetBehavior(r.teacherId, r.studentName);
+    let autoDetention = false;
+    if (netPoints >= 5 && (netPoints - r.points) < 5) {
+      // just crossed the threshold
+      const today = new Date().toISOString().slice(0, 10);
+      await this.createDetention({
+        teacherId: r.teacherId,
+        studentName: r.studentName,
+        reason: "Accumulated 5 behavior points",
+        date: today,
+        duration: 30,
+        notes: `Auto-created: student reached ${netPoints} net behavior points.`,
+      });
+      autoDetention = true;
+    }
+    return { id: rid, autoDetention };
+  },
+  async getBehaviorRecords(teacherId: string): Promise<any[]> {
+    const db = await getBackend();
+    return db.all("SELECT * FROM BehaviorRecord WHERE teacherId=? ORDER BY createdAt DESC", [teacherId]);
+  },
+  async deleteBehaviorRecord(rid: string, teacherId: string) {
+    const db = await getBackend();
+    await db.run("DELETE FROM BehaviorRecord WHERE id=? AND teacherId=?", [rid, teacherId]);
+  },
+
+  // ---------------- Achievement Points ----------------
+  async addAchievementRecord(r: { teacherId: string; studentName: string; points: number; reason: string; customReason: string }): Promise<string> {
+    const db = await getBackend();
+    const rid = id();
+    await db.run(
+      `INSERT INTO AchievementRecord (id,teacherId,studentName,points,reason,customReason,createdAt) VALUES (?,?,?,?,?,?,?)`,
+      [rid, r.teacherId, r.studentName, r.points, r.reason, r.customReason, now()]
+    );
+    return rid;
+  },
+  async getAchievementRecords(teacherId: string): Promise<any[]> {
+    const db = await getBackend();
+    return db.all("SELECT * FROM AchievementRecord WHERE teacherId=? ORDER BY createdAt DESC", [teacherId]);
+  },
+  async deleteAchievementRecord(rid: string, teacherId: string) {
+    const db = await getBackend();
+    await db.run("DELETE FROM AchievementRecord WHERE id=? AND teacherId=?", [rid, teacherId]);
+  },
+
+  // Returns net behavior points for a student: raw behavior - floor(achievement / 10)
+  async getStudentNetBehavior(teacherId: string, studentName: string): Promise<number> {
+    const db = await getBackend();
+    const bRow = await db.get(
+      "SELECT COALESCE(SUM(points),0) AS total FROM BehaviorRecord WHERE teacherId=? AND studentName=?",
+      [teacherId, studentName]
+    );
+    const aRow = await db.get(
+      "SELECT COALESCE(SUM(points),0) AS total FROM AchievementRecord WHERE teacherId=? AND studentName=?",
+      [teacherId, studentName]
+    );
+    const bTotal = Number(bRow?.total ?? 0);
+    const aTotal = Number(aRow?.total ?? 0);
+    return Math.max(0, bTotal - Math.floor(aTotal / 10));
+  },
+
+  // Returns a per-student summary for a teacher's class
+  async getStudentPointsSummary(teacherId: string): Promise<Array<{
+    studentName: string;
+    behaviorTotal: number;
+    achievementTotal: number;
+    netBehavior: number;
+    needsDetention: boolean;
+  }>> {
+    const db = await getBackend();
+    const bRows = await db.all(
+      "SELECT studentName, SUM(points) AS total FROM BehaviorRecord WHERE teacherId=? GROUP BY studentName",
+      [teacherId]
+    );
+    const aRows = await db.all(
+      "SELECT studentName, SUM(points) AS total FROM AchievementRecord WHERE teacherId=? GROUP BY studentName",
+      [teacherId]
+    );
+    const bMap = new Map(bRows.map((r: any) => [r.studentName, Number(r.total)]));
+    const aMap = new Map(aRows.map((r: any) => [r.studentName, Number(r.total)]));
+    const names = new Set([...bMap.keys(), ...aMap.keys()]);
+    return [...names].map((name) => {
+      const behaviorTotal = bMap.get(name) ?? 0;
+      const achievementTotal = aMap.get(name) ?? 0;
+      const netBehavior = Math.max(0, behaviorTotal - Math.floor(achievementTotal / 10));
+      return { studentName: name, behaviorTotal, achievementTotal, netBehavior, needsDetention: netBehavior >= 5 };
+    }).sort((a, b) => b.netBehavior - a.netBehavior);
   },
 };
